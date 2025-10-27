@@ -1,0 +1,75 @@
+﻿@page "/CompressedContainer"
+@rendermode InteractiveServer
+
+@using CompressoApp.Services;
+@using CompressoApp.Models;
+
+@inject IJSRuntime JS
+
+<h1>Compressed Data Container</h1>
+@if (summaries == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <table class="table custom-table">
+        <thead>
+            <tr>
+                <th>Dataset</th>
+                <th>Norm</th>
+                <th>K</th>
+                <th>Timestamp</th>
+                <th> </th>
+                <th>                
+                    <button class="btn btn-danger"
+                        style="width:110px"
+                        @onclick="ConfirmDeleteAll"
+                        >
+                        Delete All
+                    </button> 
+                </th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (summaries == null || !summaries.Any())
+            {
+                <tr>
+                    <td colspan="8" class="text-center text-muted py-3">
+                        No compressed data available.
+                    </td>
+                </tr>
+            }
+            else
+            {
+                @foreach (var summary in summaries)
+                {
+                    <tr>
+                        <td>@summary.DatasetName</td>
+                        <td>@summary.Norm</td>
+                        <td>@summary.K</td>
+                        <td>@summary.Timestamp.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td>
+                            <button class="action-btn primary"
+                                    style="width:110px"
+                                    @onclick="() => HandleTrain(summary.CompressionJobId)">
+                                Train
+                            </button>
+                        </td>
+                        <td>
+                            <button class="action-btn primary"
+                                    style="width:110px"
+                                    @onclick="() => HandleDelete(summary.CompressionJobId)">
+                                Delete
+                            </button>
+                        </td>
+                    </tr>
+                }
+            }    
+        </tbody>
+    </table>
+}
+
+
+
+

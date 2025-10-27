@@ -1,0 +1,56 @@
+
+@page "/"
+
+@rendermode InteractiveServer
+
+@inject IJSRuntime JS
+
+@using CompressoApp.Models
+
+<h2>Original dataset demonstration</h2>
+
+
+
+<div class="col-md-12 pe-4">
+    <DatasetSelector Value="@datasetName" ValueChanged="OnDatasetChanged"/>
+    @if (!string.IsNullOrEmpty(datasetName))
+    {
+        <p>
+            @datasetDescription
+        </p>
+
+        <button class="action-btn secondary" 
+            @onclick="() =>ToggleFigures()">
+            @(showImages ? "Hide Figures" : "Show Figures")
+        </button>
+
+        @if (showImages && Images?.Count > 0)
+        {
+            <div class="image-table">
+                @foreach (var label in DatasetInfoManager.Labels[datasetName])
+                {
+                    if (Images.ContainsKey(label))
+                    {
+                        var rowImages = Images[label];
+
+                        <div class="image-row">
+                            <div class="label-cell">
+                                <b>@label</b>
+                            </div>
+
+                            @foreach (var src in rowImages)
+                            {
+                                <img src="@src" alt="img" width="53" height="53" />
+                            }
+
+                            <button class="batch-btn" @onclick="() 
+                                    => RefreshBatch(label)">
+                                <span class="refresh">&#x21bb;</span>   
+                            </button>
+                        </div>
+                    }
+                }
+            </div>
+        }
+    }
+</div>

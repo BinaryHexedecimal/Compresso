@@ -1,0 +1,42 @@
+services:
+  backend:
+    build:
+      context: ./Backend
+    container_name: webmcs-backend
+
+    environment:
+      - GRB_WLSACCESSID=${GRB_WLSACCESSID}
+      - GRB_WLSSECRET=${GRB_WLSSECRET}
+      - GRB_LICENSEID=${GRB_LICENSEID}
+
+    volumes:
+      - ./Backend/data:/app/data
+      # optional: share your Gurobi license (local file)
+      # - ~/.gurobi_docker.lic:/root/gurobi.lic
+      
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 30s     # check every 30 seconds
+      timeout: 10s      # give curl up to 10s
+      retries: 60       # allow up to 60 failed checks (≈30 minutes total)
+      start_period: 120s  # wait 2 minutes before starting checks
+
+  frontend:
+    build:
+      context: ./CompressoApp
+    container_name: webmcs-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      # - ASPNETCORE_URLS=http://+:3000
+
+      # - BACKEND_URL=http://backend:8000
+
+      - ASPNETCORE_URLS=http://+:3000
+      # - BACKEND_URL_INTERNAL=http://backend:8000
+      # - BACKEND_URL_EXTERNAL=http://localhost:8000

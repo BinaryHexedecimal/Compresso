@@ -1,0 +1,14 @@
+@page "/graph/{jobId}/{datasetName}/{label}/{k:int}"
+
+@using CompressoApp.Services;
+@using CompressoApp.Models;
+
+@rendermode InteractiveServer
+
+<h3 class="text-primary">
+    Dataset: @datasetName, Label: @label, K: @k
+</h3>
+
+<div id="graphDiv" @ref="_graphDivRef"
+     style="width:100%; height:600px; min-height:420px; position:relative; margin: 0 auto;">
+</div>

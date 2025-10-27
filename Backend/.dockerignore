@@ -1,0 +1,25 @@
+# Python cache & env
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Temporary / generated data
+# data/
+# outputs/
+# tmp/
+# *.log
+# *.zip
+# *.tar
+# *.pth
+# *.pt
+# checkpoints/
+
+# Git
+.git/
+.gitignore
+
+# OS and IDE files
+.DS_Store
+.vscode/
+.idea/

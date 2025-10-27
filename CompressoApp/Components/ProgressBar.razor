@@ -1,0 +1,9 @@
+<div class="progress-bar @Class">
+    <div class="progress-fill" style="width:@($"{Value}%")"></div>
+</div>
+<p>@Value %</p>
+
+@code {
+    [Parameter] public int Value { get; set; }
+    [Parameter] public string? Class { get; set; }
+}

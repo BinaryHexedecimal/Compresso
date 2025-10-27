@@ -1,0 +1,123 @@
+@page "/upload"
+@rendermode InteractiveServer
+
+@using CompressoApp.Services;
+@using CompressoApp.Models;
+
+
+<div class="container-fluid">
+    <div class="row">
+        <!-- LEFT COLUMN: Dataset Table -->
+        <div class="col-md-4 border-end pe-4">
+            <h2 class="mb-3">Original Datasets</h2>
+
+            @if (datasetNames == null)
+            {
+                <p><em>Loading...</em></p>
+            }
+            else if (datasetNames.Count == 0)
+            {
+                <p>No datasets found.</p>
+            }
+            else
+            {   var userDatasets = datasetNames.Except(defaultDatasets).ToList();
+
+                <div class="table-responsive">
+                    <table class="table table-striped align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Dataset</th>
+                                @* <th colspan="2" class="text-center">Actions</th> *@
+                                <th class="text-center">. </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var datasetName in defaultDatasets)
+                            {
+                                <tr>
+                                    <td>@datasetName.ToUpper()</td>
+                                    <td class="text-center text-muted">Built-in</td>
+                                </tr>
+                            }
+
+                            @foreach (var datasetName in userDatasets)
+                            {
+                                <tr>
+                                    <td>@datasetName.ToUpper()</td>
+                                        
+                                    <td class="text-center">
+                                        <button class="btn btn-danger btn-sm"
+                                                @onclick="() => HandleDelete(datasetName)">
+                                            Delete
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+
+        <!-- RIGHT COLUMN: Placeholder -->
+        <div class="col-md-8 ps-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <button class="action-btn primary" 
+                    disabled= "@isUploading"
+                    @onclick="ShowUploadDialog">
+                    @(isUploading? "uploading..." : "Upload Dataset")
+                </button>
+            </div>
+            @if (showUpload)
+            {
+                <div class="upload-panel border p-3 rounded shadow-sm bg-light">
+                    <p class="mb-2">
+                        <strong>Dataset requirements:</strong>  <br/>
+                        Your dataset must contain one <code>train</code> folder and one <code>test</code> folder.
+                    </p>
+
+                    <p class="mb-2">
+                        <strong>Upload format:</strong>  <br/>
+                        Please compress your dataset into one archive before uploading.  <br/>
+                        Supported archive formats:
+                        <code>.zip</code>, <code>.tar</code>, <code>.tar.gz</code>, <code>.tgz</code>.
+                    </p>
+
+                    <p class="mb-0">
+                        <strong>Supported image formats (PyTorch compatible):</strong>  <br/>
+                        <code>.png</code>, <code>.jpg</code>, <code>.jpeg</code>, <code>.bmp</code>, <code>.gif</code>, <code>.tiff</code>
+                    </p>
+
+                    <div class="mt-3 d-flex align-items-center">
+                        <InputFile OnChange="OnInputFileChange" accept=".zip,.tar,.tar.gz,.tgz,.gz" />                       
+                    </div>
+
+                    <p class="mb-1"><strong>Expected directory structure:</strong></p>
+                    <pre class="bg-white p-2 rounded small mb-3">
+    your_dataset_name/
+                ├── train/
+                │       ├── your_class_name_1/
+                │       │           ├── your_fig_1.jpg
+                │       │           └── your_fig_2.jpg
+                │       └── your_class_name_2/
+                │                   ├── your_fig_3.jpg
+                │                   └── your_fig_4.jpg
+                └── test/
+                        ├── your_class_name_1/
+                        │           ├── your_fig_5.jpg
+                        │           └── your_fig_6.jpg
+                        └── your_class_name_2/
+                                    ├── your_fig_7.jpg
+                                    └── your_fig_8.jpg
+                    </pre>
+                </div>
+            }
+            else
+            {<span class="text-danger ms-3">@uploadMsg</span>}
+        </div>
+    </div>
+</div>
+
+
+
+

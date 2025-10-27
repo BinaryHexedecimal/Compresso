@@ -1,0 +1,169 @@
+@page "/TrainHistory"
+@rendermode InteractiveServer
+
+@using CompressoApp.Services;
+@using CompressoApp.Models;
+
+@inject IJSRuntime JS
+
+<h1>Train History</h1>
+
+<div class="row gx-4 align-items-start">
+<!-- Column 1: Dataset Selection -->
+<div class="col-md-8 border-end pe-2" style="align-self: flex-start;">
+@if (history == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{    
+    <table class="table history-table" style="font-size: 12px;">
+        <thead>
+            <tr>
+                <th>Dataset</th>
+                <th>K</th>
+                <th>Norm</th>
+                <th>Kind</th>
+                <th>Optimizer</th>
+                <th>LR</th>
+                <th>Timestamp </th>
+                <th>                 
+                    <button class="btn btn-danger"
+                        style="width:120px"
+                        @onclick="ConfirmDeleteAll">
+                        Delete All
+                    </button>
+                </th>
+
+            </tr>
+        </thead>
+        <tbody>
+            @if (history == null || !history.Any())
+            {
+                <tr>
+                    <td colspan="8" class="text-center text-muted py-3">
+                        No training history available.
+                    </td>
+                </tr>
+            }
+            else
+            {
+                @foreach (var trainingRun in history!.OrderByDescending(h => h.Timestamp))
+                {                   
+                    <tr class="@(trainingRun.TrainJobId == highlightTrainJobId ? "table-active" : "")">
+                        <td>@trainingRun.TrainRequest.DataInfo["dataset_name"]</td>
+                        <td>@trainingRun.TrainRequest.DataInfo["k"]</td>
+                        <td>@trainingRun.TrainRequest.DataInfo["norm"]</td>
+                        
+                        <td>
+                            @if (trainingRun.TrainRequest.Kind == "adversarial")
+                            {
+                                <span class="tooltip-badge">
+                                    adversarial
+                                    @if (trainingRun.TrainRequest is AdvTrainRequest adv)
+                                    {<span class="tooltip-text">
+                                        Adversarial run with 
+                                        attack: @adv.Attack,
+                                        epsilon: @adv.Epsilon,
+                                        alpha: @adv.Alpha
+                                    </span>}
+                                </span>
+                            }
+                            else
+                            {
+                                <span>@trainingRun.TrainRequest.Kind</span>
+                            }
+                        </td>
+
+
+
+                        <td>@trainingRun.TrainRequest.Optimizer</td>
+                        <td>@trainingRun.TrainRequest.LearningRate</td>
+                        <td>@trainingRun.Timestamp.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td>
+                            <div class="d-flex flex-column">
+                                <button class="action-btn primary mb-2"
+                                        style="width:100px"
+                                        @onclick="() => ShowEpochs(trainingRun.TrainJobId)">
+                                    Epochs
+                                </button>
+                                <button class="action-btn primary"
+                                        style="width:100px"
+                                        @onclick="() => HandleDelete(trainingRun.TrainJobId)">
+                                    Delete
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            }    
+        </tbody>
+    </table>
+}
+
+</div>
+
+
+<!-- Column 2: Results -->
+<div class="col-md-4 ps-4">
+    @{bool showAlert = selectedTrainingRun != null;}
+    @if (showAlert)
+    {
+        <div class="alert alert-success mt-2">
+            @if (selectedTrainingRun != null)
+            {
+                <span>Dataset:</span><br/>
+                <span>
+                    @selectedTrainingRun.TrainRequest.DataInfo["dataset_name"],
+                    Norm = @selectedTrainingRun.TrainRequest.DataInfo["norm"], 
+                    K = @selectedTrainingRun.TrainRequest.DataInfo["k"]
+                </span><br/>
+            }
+            @if (selectedTrainingRun != null && @selectedTrainingRun.TrainRequest.RequireAdvAttackTest)
+            {
+                <span>Final Epoch (@selectedTrainingRun.Epochs.Last().Epoch):</span> <br/>
+                <span>Adv_linf = @FormatValue(selectedTrainingRun.Epochs.Last().LinfAdvAcc), 
+                Adv_l2 = @FormatValue(selectedTrainingRun.Epochs.Last().L2AdvAcc)
+                </span><br/>
+
+                }
+            else
+            {
+                <span>&nbsp;</span><br/>
+                <span>&nbsp;</span><br/>
+            }   
+        </div>
+    }        
+
+
+    @if (selectedTrainingRun != null)
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Epoch</th>
+                    <th>Train</th>
+                    <th>Test</th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (int i = selectedTrainingRun.Epochs.Count - 1; i >= 0; i--)
+                {
+                    var epoch = selectedTrainingRun.Epochs[i];
+                    bool isLast = (i == selectedTrainingRun.Epochs.Count - 1); 
+                    
+                    <tr class="@((isLast) ? "table-success" : "")">
+                        <td>@epoch.Epoch</td>
+                        <td>@FormatValue(epoch.TrainAcc)</td>
+                        <td>@FormatValue(epoch.TestAcc)</td>
+                    </tr>
+                }
+
+            </tbody>
+        </table>
+    }
+    </div>
+</div>
+
+
+

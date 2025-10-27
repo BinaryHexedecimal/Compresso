@@ -1,0 +1,43 @@
+# ======================
+# Base image
+# ======================
+FROM python:3.11.5-slim
+
+
+# Set working directory inside the container
+WORKDIR /app
+
+# ======================
+# Install dependencies
+# ======================
+# Copy only requirements first (for better Docker caching)
+COPY requirements.txt .
+
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# ======================
+# Copy your code
+# ======================
+COPY . .
+
+
+# Optional: ensure your temporary directories exist
+#RUN mkdir -p /app/tmp_compression /app/tmp_train_checkpoints
+
+# ======================
+# Environment setup
+# ======================
+ENV PYTHONUNBUFFERED=1
+ENV MKL_NUM_THREADS=1
+ENV OMP_NUM_THREADS=1
+
+# Expose FastAPI port
+EXPOSE 8000
+
+# ======================
+# Start command
+# ======================
+# Run the app using uvicorn directly
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]

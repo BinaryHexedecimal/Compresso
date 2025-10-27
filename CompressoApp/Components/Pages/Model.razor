@@ -1,0 +1,95 @@
+@page "/Model"
+@rendermode InteractiveServer
+
+@using CompressoApp.Services;
+@using CompressoApp.Models;
+@inject IJSRuntime JS
+
+<h1>Models</h1>
+@if (modelInfos == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <table class="table custom-table">
+        <thead>
+            <tr>
+                <th>Dataset</th>
+                <th>K</th>
+                <th>Train Type</th>
+                <th>         
+                    <button class="btn btn-danger"
+                        style="width:120px"
+                        @onclick="ConfirmDeleteAll">
+                        Delete All
+                    </button>
+                </th>
+                <th></th>
+                <th>Accuracy</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (modelInfos == null || !modelInfos.Any())
+            {
+                <tr>
+                    <td colspan="8" class="text-center text-muted py-3">
+                        No models available.
+                    </td>
+                </tr>
+            }
+            else
+            {
+                @foreach (var modelInfo in modelInfos)
+                {
+                    <tr>
+                        <td>@modelInfo.DatasetName</td>
+                        <td>@modelInfo.K</td>
+                        <td>@modelInfo.Kind</td>
+                        <td>
+                            <button class="action-btn primary"
+                                    style="width:120px"
+                                    @onclick="() => HandleDelete(modelInfo.ModelId)">
+                                Delete
+                            </button>
+                        </td>
+                        <td>
+                            <td>
+                                @if (evaluatingModelId == modelInfo.ModelId)
+                                {
+                                    <button class="btn btn-secondary" disabled style="width:150px">
+                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                        &nbsp;Running...
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button class="action-btn primary"
+                                            style="width:150px"
+                                            @onclick="() => Evaluate(modelInfo.ModelId)">
+                                        Evaluate
+                                    </button>
+                                }
+                            </td>
+                        </td>
+                        <td>@{
+                                if (acc.TryGetValue(modelInfo.ModelId, out var value))
+                                {
+                                    <td>@value.ToString("F4")</td>
+                                }
+                                else
+                                {
+                                    <td>-----</td>
+                                }
+                            }
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+}
+
+
+
+

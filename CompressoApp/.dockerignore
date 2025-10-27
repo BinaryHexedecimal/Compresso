@@ -1,0 +1,26 @@
+# Build and output folders
+bin/
+obj/
+out/
+publish/
+tmp/
+logs/
+*.log
+
+# User-specific files
+.vscode/
+.idea/
+*.user
+*.suo
+*.swp
+*.sln.docstates
+
+# Git and local environment
+.git/
+.gitignore
+.env
+.DS_Store
+
+# Docker & system cache
+.dockerignore
+docker-compose*

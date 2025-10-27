@@ -1,0 +1,85 @@
+﻿@using CompressoApp.Services
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">CompressoApp</a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+
+    <nav class="nav flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
+            </NavLink>
+        </div>
+        
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="/upload">
+                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Upload Dataset
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="compression/new">
+                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Compress
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="train/new">
+                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Train
+            </NavLink>
+        </div>
+
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="@($"CompressedContainer")">
+                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Compressed Data
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="TrainHistory">
+                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Train History
+            </NavLink>
+        </div>
+        
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="model">
+                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Models
+            </NavLink>
+        </div>
+
+        
+    </nav>
+</div>
+
+
+    @*@code {
+    
+ [Inject] NavigationManager Nav { get; set; } = default!;
+    [Inject] IJSRuntime JS { get; set; } = default!; 
+    //[Inject] protected UserStateService UserState { get; set; } = default!;
+
+
+    @* protected override void OnInitialized()
+    {
+        Console.WriteLine("NavMenu OnChange triggered, UserEmail=" + UserState.UserEmail);
+        Console.WriteLine($"NavMenu component: {UserState.GetHashCode()}");
+
+        UserState.OnChange += StateHasChanged;
+    } *@
+
+    @* public void Dispose()
+    {
+        UserState.OnChange -= StateHasChanged;
+    } 
+
+
+
+
+}
+*@

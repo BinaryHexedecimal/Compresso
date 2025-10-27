@@ -1,0 +1,24 @@
+@rendermode InteractiveServer
+
+
+<select @onchange="OnChange" class="form-select" disabled="@Disabled">
+    @* <option value="">-- Select an optimizer --</option> *@
+    <option value="gurobi">Gurobi</option>
+    <option value="gurobi_relax">Gurobi Relax</option>
+    <option value="cbc">CBC</option>
+    <option value="scip">SCIP</option>
+</select>
+
+@code {
+    [Parameter] public string? Value { get; set; } = "gurobi";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public string Style { get; set; } = "";
+
+    private async Task OnChange(ChangeEventArgs e)
+    {
+        var newValue = e.Value?.ToString();
+        Value = newValue;
+        await ValueChanged.InvokeAsync(newValue);
+    }
+}

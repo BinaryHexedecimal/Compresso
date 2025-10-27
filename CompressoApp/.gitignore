@@ -1,0 +1,7 @@
+
+# C# / Blazor
+bin/
+obj/
+*.user
+*.vs/
+
