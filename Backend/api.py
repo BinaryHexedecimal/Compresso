@@ -12,12 +12,14 @@ import shutil
 import os
 import zipfile
 import torch
+from datetime import datetime
+
 
 
 
 import globals
 from models import *
-from util_train import train_worker
+from util_train import *
 from util_compression import *
 from util_data import *
 from util_image import get_images, draw_graph, transform_images_for_frontend, tensor_to_image_bytes
@@ -28,15 +30,28 @@ from util_train import *
 # ------------------ Global setup ------------------
 
 # Limit PyTorch CPU threads for safe multi-processing
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OMP_NUM_THREADS"] = "1"
+#os.environ["MKL_NUM_THREADS"] = "1"
+#os.environ["OMP_NUM_THREADS"] = "1"
 
 # Set multiprocessing start method safely
-try:
-    mp.set_start_method("spawn", force=True)  # safer for torch + macOS + Docker
-except RuntimeError:
-    # already set by another module
-    pass
+# try:
+#     mp.set_start_method("spawn", force=True)  # safer for torch + macOS + Docker
+# except RuntimeError:
+#     # already set by another module
+#     pass
+
+
+
+
+# Track cancel flags and active jobs
+ACTIVE_JOBS = {
+    "compression": {},  # e.g., {"job_id": {"cancel": False}}
+    "training": {}
+}
+
+#active_compression_summary = None
+active_compressed_data_obj = None
+
 
 
 # ------------------ Unified lifespan ------------------
@@ -56,7 +71,7 @@ async def lifespan(app: FastAPI):
         globals.PERMANENT_TRAIN_MODELS_DIR,
         globals.ADJ_MATRIX_DIR,
         globals.TMP_DATA_FOR_GRAPH_DIR,
-        globals.TMP_DATA_OF_COMPRESSION_DIR,
+        #globals.TMP_DATA_OF_COMPRESSION_DIR,
         globals.TMP_TRAIN_CHECKPOINT_DIR,
     ]:
         d.mkdir(parents=True, exist_ok=True)
@@ -87,16 +102,15 @@ async def lifespan(app: FastAPI):
 
 
 
+    #active_compressed_data_obj=None
 
 
-
-
-    app.state.compression_jobs = {}
-    app.state.training_jobs = {}
-    app.state.compressed_data_dict = {}
+    # app.state.compression_jobs = {}
+    # app.state.training_jobs = {}
+    # app.state.compressed_data_dict = {}
 
     # Clean temp dirs
-    for path in [globals.TMP_DATA_FOR_GRAPH_DIR, globals.TMP_DATA_OF_COMPRESSION_DIR,
+    for path in [globals.TMP_DATA_FOR_GRAPH_DIR, 
                   globals.TMP_TRAIN_CHECKPOINT_DIR]:
         if path.exists():
             for file in path.iterdir():
@@ -121,28 +135,28 @@ async def lifespan(app: FastAPI):
     # --- Shutdown phase ---
     print("Cleaning up worker processes...")
 
-    for job_dict_name in ("compression_jobs", "training_jobs"):
-        if hasattr(app.state, job_dict_name):
-            job_dict = getattr(app.state, job_dict_name)
-            for jobid, job in list(job_dict.items()):
-                proc = job.get("process")
-                if proc and proc.is_alive():
-                    print(f"  Terminating job {jobid} (pid={proc.pid})")
-                    proc.terminate()
-                    proc.join(timeout=2)
+    # for job_dict_name in ("compression_jobs", "training_jobs"):
+    #     if hasattr(app.state, job_dict_name):
+    #         job_dict = getattr(app.state, job_dict_name)
+    #         for jobid, job in list(job_dict.items()):
+    #             proc = job.get("process")
+    #             if proc and proc.is_alive():
+    #                 print(f"  Terminating job {jobid} (pid={proc.pid})")
+    #                 proc.terminate()
+    #                 proc.join(timeout=2)
 
-                # Close associated queues and events
-                for key in ("queue", "results", "cancel"):
-                    obj = job.get(key)
-                    if obj:
-                        try:
-                            obj.close()
-                        except Exception:
-                            pass
+    #             # Close associated queues and events
+    #             for key in ("queue", "results", "cancel"):
+    #                 obj = job.get(key)
+    #                 if obj:
+    #                     try:
+    #                         obj.close()
+    #                     except Exception:
+    #                         pass
 
-            job_dict.clear()
+    #         job_dict.clear()
 
-    print("Cleanup finished. Server shutdown complete.")
+    # print("Cleanup finished. Server shutdown complete.")
 
 
 # ------------------ FastAPI app ------------------
@@ -158,86 +172,75 @@ app.add_middleware(
 
 
 # ------------------ Compression  ------------------
+
 @app.post("/compress")
-async def start_compression(req: CompressRequest):
+async def compress(req: CompressRequest):
     start_time = time.time()
-    
-    cancel_event = multiprocessing.Event()
-    progress_queue = multiprocessing.Queue()
+    job_id = req.compression_job_id
+    ACTIVE_JOBS["compression"][job_id] = {"cancel": False}
 
-    proc = multiprocessing.Process(
-        target = worker_process,
-        args = (req, start_time, progress_queue, cancel_event)
-    )
-
-    app.state.compression_jobs[req.compression_job_id] = {
-        "process": proc,
-        "queue": progress_queue,
-        "cancel": cancel_event
-    }
-    proc.start()
-    # launch track_compression_completion in background
-    asyncio.create_task(track_compression_completion(req.compression_job_id))
-    return StartCompressionResponse(success=True, message="Compression started successfully")
-
-
-@app.get("/compress/{compression_job_id}")
-async def stream_progress(compression_job_id: str):
-    job = app.state.compression_jobs.get(compression_job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    progress_queue = job["queue"]
+    labels = load_dataset_classes()[req.dataset_name]
 
     async def event_stream():
-        while True:
-            if not progress_queue.empty():
-                msg = progress_queue.get()
-                yield f"data: {json.dumps(msg)}\n\n".encode("utf-8")
-                if msg.get("done") or msg.get("cancelled") or msg.get("error"):
-                    break
-            else:
-                await asyncio.sleep(0.05)
+        # Notify start
+        yield f"data: {json.dumps({'type': 'start'})}\n\n"
+        yield f"data: {json.dumps({'total': len(labels)})}\n\n"
+        compressed_data_by_label = {}
+        for i, label in enumerate(labels):
+
+            # Let FastAPI handle any cancel requests now
+            await asyncio.sleep(0.2)
+
+
+            if ACTIVE_JOBS["compression"][job_id]["cancel"]:
+                #yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+                break
+
+            compressed_subset = compress_MFC_per_label(label, req)
+            compressed_data_by_label[label] = compressed_subset
+
+            yield f"data: {json.dumps({'progress': i})}\n\n"
+
+        if ACTIVE_JOBS["compression"][job_id]["cancel"]:
+            yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+        else:
+            summary = CompressionSummary(
+                compression_id=req.compression_job_id,
+                dataset_name=req.dataset_name,
+                timestamp=datetime.datetime.now(),
+                norm=req.norm,
+                k=req.k,
+                elapsed_seconds=int(time.time() - start_time),
+                labels=labels,
+            )
+
+            offsets_by_label = {key: 0 for key in labels}
+            global active_compressed_data_obj
+            active_compressed_data_obj = CompressedDatasetObj(
+                compression_id=req.compression_job_id,
+                compressed_data_by_label=compressed_data_by_label,
+                summary=summary,
+                offsets_by_label=offsets_by_label,
+            )
+
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        ACTIVE_JOBS["compression"].pop(job_id, None)
+
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@app.delete("/compress/{compression_job_id}")
+
+@app.delete("/cancel_compression/{compression_job_id}")
 def cancel_compression(compression_job_id: str):
-    job = app.state.compression_jobs.get(compression_job_id)
+    print("will set job cancelled")
+    job = ACTIVE_JOBS["compression"].get(compression_job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job["cancel"].set()   # signal to worker
-    job["queue"].put({"cancelled": True})
-    return {"status": "cancellation requested", "id": compression_job_id}
+        raise HTTPException(404, "Job not found")
+    job["cancel"] = True
+    return {"status": "cancel requested", "id": compression_job_id}
 
 
-async def track_compression_completion(compression_job_id: str):
-    job = app.state.compression_jobs.get(compression_job_id)
-    if not job:
-        return
-    proc = job["process"]
-
-    # Wait for process to finish
-    while proc.is_alive():
-        await asyncio.sleep(0.1)
-    
-    proc.join()  # wait for completion
-    # Clean up the job
-    await asyncio.sleep(1)
-
-    app.state.compression_jobs.pop(compression_job_id, None)
-
-    save_path = f"{globals.TMP_DATA_OF_COMPRESSION_DIR}/{compression_job_id}_compressed.pt"
-    
-    obj = torch.load(save_path, map_location="cpu", weights_only=False)
-
-    compressed_dataset_obj =  CompressedDatasetObj(
-                                compression_id = compression_job_id, 
-                                compressed_data_by_label= obj["compressed_data_by_label"],
-                                summary = obj["summary"],
-                                offsets_by_label = obj["offsets_by_label"],
-                                )
-
-    app.state.compressed_data_dict[compression_job_id] = compressed_dataset_obj
 
 
 
@@ -262,18 +265,23 @@ def sample_origin_images(dataset_name: str, label: str, n: int):
 
 @app.get("/sample_compressed_images")
 def sample_compressed_images(compression_job_id:str, label: str, n: int):
-    
-    compressed_data_obj = app.state.compressed_data_dict[compression_job_id]
-    dataset_by_label = compressed_data_obj.compressed_data_by_label
-    sequential_offsets = compressed_data_obj.offsets_by_label
-    labels = compressed_data_obj.summary.labels
-    if label not in labels:
-        raise HTTPException(404, detail=f"Label {label} not found")
-    sequential_offset = sequential_offsets[label]
-    new_sequential_offset, images = get_images(
-             dataset_by_label[label], n, sequential_offset, random_mode = False)
-    app.state.compressed_data_dict[compression_job_id].offsets_by_label[label] = new_sequential_offset
-    return transform_images_for_frontend(images)
+    if (active_compressed_data_obj.compression_id == compression_job_id):
+        #compressed_data_obj = app.state.compressed_data_dict[compression_job_id]
+        dataset_by_label = active_compressed_data_obj.compressed_data_by_label
+        sequential_offsets = active_compressed_data_obj.offsets_by_label
+        labels = active_compressed_data_obj.summary.labels
+        if label not in labels:
+            raise HTTPException(404, detail=f"Label {label} not found")
+        sequential_offset = sequential_offsets[label]
+        new_sequential_offset, images = get_images(
+                dataset_by_label[label], n, sequential_offset, random_mode = False)
+        active_compressed_data_obj.offsets_by_label[label] = new_sequential_offset
+        return transform_images_for_frontend(images)
+    else:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{active_compressed_data_obj.compression_id}'."
+        )
 
 
 @app.post("/get_graph_json_data/{compression_job_id}/{label}/{k}")
@@ -341,14 +349,14 @@ def delete_all_graph():
 
 @app.get("/fetch_compression_summary_from_memory/{compression_job_id}")
 async def fetch_compression_summary_from_memory(compression_job_id: str):
-    container = app.state.compressed_data_dict
-    while compression_job_id not in container:
-        await asyncio.sleep(0.1)  # adjust sleep interval as needed
-    # Wait for the summary to be populated
-    while getattr(container[compression_job_id], "summary", None) is None:
-        await asyncio.sleep(0.1)
-    summary = getattr(container[compression_job_id], "summary")
-    return {"summary": summary, "status": "done"}
+    if active_compressed_data_obj.compression_id == compression_job_id:
+        summary = active_compressed_data_obj.summary
+        return {"summary": summary, "status": "done"}
+    else:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{active_compressed_data_obj.compression_id}'."
+        )
 
 
 
@@ -462,53 +470,58 @@ def save_in_container(compression_job_id: str):
     if not file_dir.exists():
         raise HTTPException(status_code=500, detail=f"Container directory {file_dir} does not exist")
     
-    compressed_obj = app.state.compressed_data_dict.get(compression_job_id)
-    current_summary = compressed_obj.summary
-    if not compressed_obj:
-        raise HTTPException(status_code=404, detail="Compressed data not found")
-    
-    dataset_name = compressed_obj.summary.dataset_name
-    files = [f for f in os.listdir(file_dir) if f.endswith("_summary.json")]
-    if len(files) >= globals.MAX_FILES_IN_CONTAINER :
+    if compression_job_id != active_compressed_data_obj.compression_id:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{active_compressed_data_obj.compression_id}'."
+        )
+    else:
+        #compressed_obj = app.state.compressed_data_dict.get(compression_job_id)
+        current_summary = active_compressed_data_obj.summary
+
+        dataset_name = current_summary.dataset_name
+        
+        files = [f for f in os.listdir(file_dir) if f.endswith("_summary.json")]
+        if len(files) >= globals.MAX_FILES_IN_CONTAINER :
+            return JSONResponse(content={
+                "SaveMessage": f"⚠️Container full: {len(files)}/{globals.MAX_FILES_IN_CONTAINER} files.",
+                "RequireUserDecision": True
+            })
+        for f in files:
+            with open(os.path.join(file_dir, f), "r") as sf:
+                try:
+                    saved_summary = json.load(sf)
+                except Exception:
+                    continue  # skip corrupted or unreadable summaries
+
+                if (saved_summary.get("dataset_name") == current_summary.dataset_name and
+                    saved_summary.get("k") == current_summary.k and
+                    saved_summary.get("norm") == current_summary.norm):
+
+                    print("Found duplicate id is " + saved_summary.get("compression_id"))
+                    return JSONResponse(content={
+                        "SaveMessage": (
+                            f"⚠️Duplicate found: Dataset {current_summary.dataset_name}, "
+                            f"k={current_summary.k}, norm={current_summary.norm} already exists."
+                        ),
+                        "RequireUserDecision": True,
+                        "DuplicateId": saved_summary.get("compression_id")
+                    })
+
+        # Save .pt 
+        save_trainable_data_in_container(
+                                active_compressed_data_obj.compressed_data_by_label, 
+                                compression_job_id,
+                                dataset_name = dataset_name)
+
+        # Save summary
+        #torch.save(data_obj, os.path.join(file_dir, f"{compression_job_id}_compressed_data.pt"))
+        with open(os.path.join(file_dir, f"{compression_job_id}_summary.json"), "w") as f:
+            f.write(active_compressed_data_obj.summary.json())
+
         return JSONResponse(content={
-            "SaveMessage": f"⚠️Container full: {len(files)}/{globals.MAX_FILES_IN_CONTAINER} files.",
-            "RequireUserDecision": True
-        })
-    for f in files:
-        with open(os.path.join(file_dir, f), "r") as sf:
-            try:
-                saved_summary = json.load(sf)
-            except Exception:
-                continue  # skip corrupted or unreadable summaries
-
-            if (saved_summary.get("dataset_name") == current_summary.dataset_name and
-                saved_summary.get("k") == current_summary.k and
-                saved_summary.get("norm") == current_summary.norm):
-
-                print("Found duplicate id is " + saved_summary.get("compression_id"))
-                return JSONResponse(content={
-                    "SaveMessage": (
-                        f"⚠️Duplicate found: Dataset {current_summary.dataset_name}, "
-                        f"k={current_summary.k}, norm={current_summary.norm} already exists."
-                    ),
-                    "RequireUserDecision": True,
-                    "DuplicateId": saved_summary.get("compression_id")
-                })
-
-    # Save .pt 
-    save_trainable_data_in_container(
-                            compressed_obj.compressed_data_by_label, 
-                            compression_job_id,
-                            dataset_name = dataset_name)
-
-    # Save summary
-    #torch.save(data_obj, os.path.join(file_dir, f"{compression_job_id}_compressed_data.pt"))
-    with open(os.path.join(file_dir, f"{compression_job_id}_summary.json"), "w") as f:
-        f.write(compressed_obj.summary.json())
-
-    return JSONResponse(content={
-        "SaveMessage": "✅Saved successfully.",
-        "RequireUserDecision": False})
+            "SaveMessage": "✅Saved successfully.",
+            "RequireUserDecision": False})
 
 
 @app.post("/handle_replace_choice/{compression_job_id}/{duplicate_id}")
@@ -525,9 +538,12 @@ def handle_replace_choice(compression_job_id: str, duplicate_id: Optional[str] =
                 "RequireUserDecision": True
             }
         )
+    # print(active_compressed_data_obj.compression_id)
+    # print(compression_job_id)
+    # print(duplicate_id)
 
-    compressed_obj = app.state.compressed_data_dict.get(compression_job_id)
-    if not compressed_obj:
+    #compressed_obj = app.state.compressed_data_dict.get(compression_job_id)
+    if active_compressed_data_obj.compression_id != compression_job_id:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
             content={
@@ -573,14 +589,14 @@ def handle_replace_choice(compression_job_id: str, duplicate_id: Optional[str] =
             message_suffix = " by replacing the old duplicate."
 
         # --- Save new compressed results ---
-        dataset_name = compressed_obj.summary.dataset_name
-        save_trainable_data_in_container(compressed_obj.compressed_data_by_label, 
+        dataset_name = active_compressed_data_obj.summary.dataset_name
+        save_trainable_data_in_container(active_compressed_data_obj.compressed_data_by_label, 
                                              compression_job_id,
                                              dataset_name=dataset_name)
 
         
         with open(file_dir / f"{compression_job_id}_summary.json", "w") as f:
-            f.write(compressed_obj.summary.json())
+            f.write(active_compressed_data_obj.summary.json())
 
         final_message = f"✅Saved successfully{message_suffix}"
         print(final_message)
@@ -804,84 +820,171 @@ def delete_all_history():
 @app.post("/train")
 async def stream_training(req: BaseTrainRequest):
 
-    cancel_event = multiprocessing.Event()
-    progress_queue = multiprocessing.Queue()
-
-    req_ = req.model_dump()
-    kind = req_.get("kind", "").lower()
-    if kind == "standard":
-        req_obj = StandardTrainRequest(**req_)
-    else:
-        req_obj = AdvTrainRequest(**req_)
-
-    compressed_obj = app.state.compressed_data_dict.get(req_obj.data_info.get("data_id"))
-    if compressed_obj:
-        dataset_name = compressed_obj.summary.dataset_name
-        res = prepare_trainable_data(compressed_obj.compressed_data_by_label, dataset_name = dataset_name)
-    else:
-        data_path = globals.COMPRESSION_CONTAINER_DIR / f"{req_obj.data_info.get('data_id')}_compressed_data.pt"
-        res = torch.load(data_path, weights_only=False)
-
-
-    train_dataset = TensorDataset(res["train_x"], res["train_y"])
-    #train_loader = DataLoader(data_obj, batch_size=64, shuffle=True)
-
+    #cancel_event = multiprocessing.Event()
+    #progress_queue = multiprocessing.Queue()
+    ACTIVE_JOBS["training"][req.train_job_id] = {"cancel": False}
 
     async def event_stream():
-        # Start training after SSE is ready
-        proc = multiprocessing.Process(
-                                    target=train_worker,
-                                    args=(req_obj, train_dataset,
-                                        progress_queue, cancel_event)
-                                    )
-        proc.start()
+        # Notify start
 
-        app.state.training_jobs[req.train_job_id] = {
-            "process": proc,
-            "queue": progress_queue,
-            "cancel": cancel_event,
-        }
+        req_ = req.model_dump()
+        kind = req_.get("kind", "").lower()
+        if kind == "standard":
+            req_obj = StandardTrainRequest(**req_)
+        else:
+            req_obj = AdvTrainRequest(**req_)
 
-        while True:
-            if not progress_queue.empty():
-                msg = progress_queue.get()
-                yield f"data: {json.dumps(msg)}\n\n".encode("utf-8")
-                if msg.get("type") in ("done", "cancelled", "error"):
-                    break
+        data_path = globals.COMPRESSION_CONTAINER_DIR / f"{req_obj.data_info.get('data_id')}_compressed_data.pt"
+        res = torch.load(data_path, weights_only=False)
+        train_dataset = TensorDataset(res["train_x"], res["train_y"])
+        #train_loader = DataLoader(data_obj, batch_size=64, shuffle=True)
+        test_dataset = load_dataset(req_obj.data_info.get('dataset_name'), train_ = False)
+
+        #progress_queue.put({"type": "start"})
+        train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+        test_loader  = DataLoader(test_dataset, batch_size=64, shuffle=False)
+
+        sample, _ = train_dataset[0]
+        _in_channels = sample.shape[0] 
+        _num_classes = len(load_dataset_classes()[req_obj.data_info["dataset_name"]])
+        #print(f"inside training, channael is {_in_channels} , num of class is {_num_classes}")
+        model = ConvNet(in_channels=_in_channels, num_classes=_num_classes)
+
+        #eps_linf=0.3,
+        #eps_l2=1.5,
+
+        trainer = TR(model, train_loader, test_loader, eps_linf=globals.EPS_LINF, eps_l2=globals.EPS_L2)
+        
+        # Select optimizer
+        if req_obj.optimizer.lower() == "sgd":
+            opt = torch.optim.SGD(model.parameters(), lr=req_obj.learning_rate, momentum=0.9, weight_decay=5e-4)
+        elif req_obj.optimizer.lower() == "adam":
+            opt = torch.optim.Adam(model.parameters(), lr=req_obj.learning_rate, weight_decay=5e-4)
+        else:
+            raise ValueError(f"Unknown optimizer: {req_obj.optimizer}")
+
+
+        all_epochs = []
+        run_info = {"status": "started", 
+                             "train_job_id": req_obj.train_job_id,
+                             "timestamp": "",
+                             "epochs": [], 
+                             "req_obj": vars(req_obj)}
+
+        yield f"data: {json.dumps({'type': 'start'})}\n\n"
+        for epoch in range(1, req_obj.num_iterations+1):
+            await asyncio.sleep(0.2)
+            if ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:
+                #yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+                break
+
+            epoch_path = globals.TMP_TRAIN_CHECKPOINT_DIR / f"{req_obj.train_job_id}_epoch_{epoch}.pt"
+            if req_obj.kind == "standard":                
+                train_acc, train_loss = trainer.epoch(train_loader, weight=False, opt=opt)
+                test_acc, test_loss = trainer.epoch(test_loader)
+
+                if (req_obj.num_iterations == epoch) and req_obj.require_adv_attack_test:   
+                    linf_adv_acc, linf_adv_loss = trainer.epoch_adv(test_loader, trainer.pgd_linf, weight=False, epsilon=trainer.eps_linf)
+                    #l2_adv_acc, l2_adv_loss = trainer.epoch_adv(test_loader, trainer.pgd_l2, weight=False, epsilon=trainer.eps_l2)
+                else:
+                    linf_adv_acc, linf_adv_loss = -1, -1
+                    #l2_adv_acc, l2_adv_loss = -1, -1
+
+                torch.save(model.state_dict(), epoch_path)
+                print(f"Saved temporary checkpoint: {epoch_path}")    
+
+            elif req_obj.kind == "adversarial":
+                attack = trainer.pgd_linf if req_obj.attack == "PGD-linf" else trainer.pgd_l2
+                train_acc, train_loss = trainer.epoch_adv(train_loader, attack=attack, weight=False, opt=opt, epsilon=req_obj.epsilon, alpha = req_obj.alpha  )
+                test_acc, test_loss = trainer.epoch(test_loader)
+
+                if (req_obj.num_iterations == epoch) and req_obj.require_adv_attack_test:  
+                    linf_adv_acc, linf_adv_loss = trainer.epoch_adv(test_loader, trainer.pgd_linf, weight=False, epsilon=trainer.eps_linf)
+
+                else:
+                    linf_adv_acc, linf_adv_loss = -1, -1
+                    #l2_adv_acc, l2_adv_loss = -1, -1
+
+                torch.save(model.state_dict(), epoch_path)
+                print(f"Saved temporary checkpoint: {epoch_path}")    
+
             else:
-                await asyncio.sleep(0.05)
+                print("ulalalalla, no such a kind of train")
+            epoch_data = {
+                "type": "epoch",
+                "epoch": epoch,
+                "train_acc": train_acc,
+                #"train_loss": train_loss,
+                "test_acc": test_acc,
+                #"test_loss": test_loss,
+                "linf_adv_acc": linf_adv_acc,
+                #"linf_adv_loss": linf_adv_loss,
+                #"l2_adv_acc": l2_adv_acc,
+                #"l2_adv_loss": l2_adv_loss,
+            }
 
-        progress_queue.close()
-        asyncio.create_task(track_training_completion(req.train_job_id))
+            all_epochs.append(epoch_data)
+            #yield f"data: {json.dumps({'epoch': epoch})}\n\n"
+            yield f"data: {json.dumps(epoch_data)}\n\n"
+
+        #progress_queue.put({"type": "done"})
+        if ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:            
+            run_info["status"]="cancelled"
+            
+        else:
+            run_info["status"]= "done"
+           
+            
+
+        run_info["epochs"] = all_epochs
+        run_info["timestamp"] = datetime.datetime.now().isoformat()
+
+
+        if os.path.exists(globals.TRAINING_HISTORY_PATH):
+            with open(globals.TRAINING_HISTORY_PATH, "r") as f:
+                try:
+                    history = json.load(f)
+                except json.JSONDecodeError:
+                    history = []
+        else:
+            history = []
+
+        if not isinstance(history, list):
+            history = [history]
+
+        # Append new run
+        history.append(run_info)
+
+        # Save back
+        with open(globals.TRAINING_HISTORY_PATH, "w") as f:
+            json.dump(history, f, indent=4)
+
+        print(f"Saved training result for job {run_info['train_job_id']}")
+
+        if ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:            
+            yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+            
+        else:
+            #run_info["status"]= "done"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+
+        ACTIVE_JOBS["training"].pop(req.train_job_id, None)
+
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@app.delete("/train/{train_id}")
+
+
+
+@app.delete("/cancel_train/{train_id}")
 def cancel_training(train_id: str):
-    job = app.state.training_jobs.get(train_id)
+    job = ACTIVE_JOBS["training"].get(train_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    job["cancel"].set()   # signal to worker
-    job["queue"].put({"cancelled": True})
+    job["cancel"]= True   # signal to worker
     return {"status": "cancellation requested", "id": train_id}
 
-
-
-async def track_training_completion(train_id: str):
-    """
-    Waits for process to finish, cleans up app state.
-    Stores final model and per-epoch metrics.
-    """
-    job = app.state.training_jobs.get(train_id)
-    if not job:
-        return
-
-    proc = job["process"]
-    proc.join()  # wait for completion
-
-    # Clean up the job
-    await asyncio.sleep(0.1)
-    app.state.training_jobs.pop(train_id, None)
 
 
 

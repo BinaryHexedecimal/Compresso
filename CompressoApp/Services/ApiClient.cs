@@ -37,8 +37,11 @@ public class ApiClient
 
     public async Task CancelCompressionAsync(string compression_job_id)
     {
-        await _http.DeleteAsync($"/compress/{compression_job_id}");
+        Console.WriteLine("here send msg to backend to cancel");
+        await _http.DeleteAsync($"/cancel_compression/{compression_job_id}");
     }
+
+
 
 
     // --------------------- Image support -------------------------//
@@ -418,7 +421,7 @@ public class ApiClient
     // --------------------- Train  -------------------------//
     public async Task CancelTrainingAsync(string train_id)
     {
-        await _http.DeleteAsync($"/train/{train_id}");
+        await _http.DeleteAsync($"/cancel_train/{train_id}");
     }
 
 

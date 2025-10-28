@@ -10,7 +10,7 @@ public partial class CompressedContainer : ComponentBase
     [Inject] private ApiClient Api { get; set; } = default!;
     [Inject] private NavigationManager NavManager { get; set; } = default!;
     //[Inject] private SummaryLoadService SummaryService { get; set; } = default!;
-    [Inject] private TrainStateService TrainState { get; set; } = default!;
+    //[Inject] private TrainStateService TrainState { get; set; } = default!;
     [Inject] private IServiceProvider Services { get; set; } = default!;
     private string backendUrl = string.Empty;
     private BackendUrls? backendUrls;
@@ -29,9 +29,9 @@ public partial class CompressedContainer : ComponentBase
     private async Task HandleTrain(string jobId)
     {
         // Optional: Show a status message or refresh summaries
-        Nav($"/Train/new");
-        TrainState.DefaultDataId = jobId;
-        TrainState.DefaultSummary = await Api.LoadSummaryFromContainerAsync(jobId);
+        Nav($"/Train");
+        //DefaultDataId = jobId;
+        //DefaultSummary = await Api.LoadSummaryFromContainerAsync(jobId);
 
     }
 

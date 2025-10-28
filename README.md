@@ -82,15 +82,6 @@ GRB_WLSSECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 GRB_LICENSEID=1234567
 ```
 
-The `docker-compose.yml` file already includes the environment section to export your credentials automatically, so you don’t need to modify it:
-
-```
-environment:
-  - GRB_WLSACCESSID=${GRB_WLSACCESSID}
-  - GRB_WLSSECRET=${GRB_WLSSECRET}
-  - GRB_LICENSEID=${GRB_LICENSEID}
-```
-
 #### 3. Build and run the application
 ```
 docker compose up --build
@@ -134,6 +125,7 @@ More issues may be added as they arise.
   ```
   docker compose up --build
   ```
+- For visualization purposes,  we use 15% of each of the four built-in training datasets in compression. This configuration is designed to ensure smooth operation on a typical personal computer. The parameter can be adjusted by modifying **BUILT_IN_DATASET_PERCENT** in `Backend/globals.py` as needed.  
 
 
 

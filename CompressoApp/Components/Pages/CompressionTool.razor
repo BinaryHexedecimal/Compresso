@@ -1,5 +1,5 @@
 @page "/compression"
-@page "/compression/new"
+@* @page "/compression/new" *@
 
 @rendermode InteractiveServer
 
@@ -15,30 +15,38 @@
         <!-- Set Parameters -->
         <div class="col-md-12 mb-3">
             <label class="form-label fw-bold">Dataset</label>
-
-            <DatasetSelector @bind-Value="CompressionState.DatasetName"
-                 Disabled="@(CompressionState.IsCompressing || CompressionState.HasFinished)" />
+@* 
+            <DatasetSelector @bind-Value="DatasetName"
+                 Disabled="@(IsCompressing || HasFinished)" /> *@
+            
+            <DatasetSelector 
+                Value="DatasetName"
+                ValueChanged="OnDatasetChanged"
+                Disabled="@(IsCompressing 
+                || HasFinished
+                || IsCancelling)" 
+            />
 
             
         </div>
 
         <div class="col-md-12 mb-3">
             <label class="form-label fw-bold" placeholder="L2" >Norm</label>
-            <NormSelector @bind-Value="CompressionState.Norm" 
-                Disabled="@(CompressionState.IsCompressing || CompressionState.HasFinished)"/>
+            <NormSelector @bind-Value="Norm" 
+                Disabled="@(IsCompressing || HasFinished)"/>
         </div>
 
         <div class="col-md-12 mb-3 ">
             <label class="form-label fw-bold">Optimizer</label> 
-            <OptimizerSelector @bind-Value="CompressionState.Optimizer" 
-                Disabled="@(CompressionState.IsCompressing || CompressionState.HasFinished)" />
+            <OptimizerSelector @bind-Value="Optimizer" 
+                Disabled="@(IsCompressing || HasFinished)" />
         </div>
 
         <div class="col-md-12 mb-3 "> 
             <label class="form-label fw-bold me-2" >k</label> 
-            <input type="number" step="1" @bind="CompressionState.K" placeholder="-- k -- " 
+            <input type="number" step="1" @bind="K" placeholder="-- k -- " 
             class="form-control flex-grow-1" 
-            Disabled="@(CompressionState.IsCompressing || CompressionState.HasFinished)" 
+            Disabled="@(IsCompressing || HasFinished)" 
             @oninput="ValidateK"
             /> 
             @if (!string.IsNullOrEmpty(KError))
@@ -50,9 +58,9 @@
         <!-- Eta -->
         @* <div class="col-md-12 mb-3"> 
             <label class="form-label fw-bold me-2" >Eta</label> 
-            <input type="number" step="0.01" @bind="CompressionState.Eta" 
+            <input type="number" step="0.01" @bind="Eta" 
             placeholder="eta (optional)" class="form-control" 
-            Disabled="@(CompressionState.IsCompressing || CompressionState.HasFinished )" 
+            Disabled="@(IsCompressing || HasFinished )" 
             @oninput="ValidateEta"
             /> 
             @if (!string.IsNullOrEmpty(EtaError))
@@ -62,10 +70,10 @@
         </div> *@
 
         <!-- Left Side: compression progress -->
-        @if (!CompressionState.HasFinished)
+        @if (!HasFinished)
         {
         
-            @if (CompressionState.IsCompressing)
+            @if (IsCompressing)
             {
             <div class="d-flex align-items-center gap-2">
                 <button class="btn btn-secondary" disabled style="width:200px">
@@ -78,14 +86,25 @@
             </div>
 
             }
+            else if (IsCancelling)
+            {
+            <div class="d-flex align-items-center gap-2">
+                <button class="btn btn-secondary" disabled style="width:300px">
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    &nbsp;Cancelling...
+                </button>
+            </div>
+
+            }
+
             else
             {
                 <button class="action-btn primary flex-grow-1 me-2"
-                        disabled="@(CompressionState.IsCompressing
-                            ||      string.IsNullOrWhiteSpace(CompressionState.DatasetName)
+                        disabled="@(IsCompressing
+                            ||      string.IsNullOrWhiteSpace(DatasetName)
                             ||!string.IsNullOrWhiteSpace(EtaError)
                             ||!string.IsNullOrEmpty(KError)
-                            ||CompressionState.HasFinished)"
+                            ||HasFinished)"
                         @onclick="async () => 
                         {await StartCompression();}">
                     Compress
@@ -93,31 +112,31 @@
             }
 
             <!-- Progress + Elapsed Time -->
-            @if (CompressionState.IsCompressing)
+            @if (IsCompressing)
             {
                 <div class="progress-container mb-2" style="position: relative; height: 25px;  background-color: #e0e0e0">
                     <div class="progress-bar"
                         role="progressbar"
-                        style="width:@CompressionState.ProgressPercent; height:100%; background-color:var(--primary-color); transition: width 0.2s ease;">
+                        style="width:@ProgressPercent; height:100%; background-color:var(--primary-color); transition: width 0.2s ease;">
                     </div>
 
                     <!-- Progress Text -->
                     <span style="position: absolute; left: 5px; top: 50%; transform: translateY(-50%); font-weight: bold; color: black; width: 150px; display: inline-block;">
-                        @if (CompressionState.IsPreparingForCompression)
+                        @if (IsPreparingForCompression)
                         {
                             <text>Preparing...</text>
                         }
                         else
                         {
-                            <text>@CompressionState.ProgressPercent</text>
+                            <text>@ProgressPercent</text>
                         }
                     </span>
                 </div>
 
                 <div class="mb-2 flex-shrink-0" style="min-height: 44px;">
-                    @if (CompressionState.ElapsedSeconds > 0)
+                    @if (ElapsedSeconds > 0)
                     {
-                        <span>Elapsed time: ~ @CompressionState.ElapsedSeconds s</span>
+                        <span>Elapsed time: ~ @ElapsedSeconds s</span>
                     }
                     else
                     {
@@ -137,7 +156,7 @@
             }
         }
 
-        @if (CompressionState.HasFinished)
+        @if (HasFinished)
         {
         <div class="col-md-12 mb-3"> 
             <button class="action-btn primary" 
@@ -147,13 +166,13 @@
                 New compression
             </button>
         </div>
-        <div class="col-md-12 mb-3"> 
+        @* <div class="col-md-12 mb-3"> 
         <button class="action-btn primary" 
                 style="width: 220px;"
                 @onclick="() => GoToTrain()">
             Train
         </button>
-        </div>
+        </div> *@
         <div class="col-md-12 mb-3"> 
         <button class="action-btn primary" 
                 style="width: 220px;"
@@ -161,10 +180,10 @@
                 @onclick="() => SaveToContainer()">
             Save to Container
         </button>
-        @if (!string.IsNullOrEmpty(SaveMessage) && CompressionState.CompressionId != "")
+        @if (!string.IsNullOrEmpty(SaveMessage) && CompressionId != "")
         {
             <div style="display: flex; width: 200px; align-items: center;">
-                @if (!string.IsNullOrEmpty(SaveMessage) && CompressionState.CompressionId != "")
+                @if (!string.IsNullOrEmpty(SaveMessage) && CompressionId != "")
                 {
                     <p class="text-danger mb-0">@SaveMessage</p>
                 }
@@ -174,7 +193,7 @@
                 <div class="options d-flex flex-column gap-2 mt-1">
                     <button class="btn btn-secondary" 
                         @onclick="@(() => HandleCancelChoice())"
-                        style="width: 380px;"
+                        
                         >
                         Cancel
                     </button>
@@ -195,7 +214,7 @@
     <div class="col-md-8 pe-1" style="align-self: flex-start;">   
         <!-- Compression Summary Section -->
         <div class="row justify-content-center mt-8">
-            @if (CompressionState.CompressionSummary != null)
+            @if (CompressionSummary != null)
             {
                 <h5 class="fw-bold text-success mb-3">
                     <i class="bi bi-bar-chart-fill me-2"></i>Compression Summary
@@ -210,9 +229,9 @@
                             <td>Elapsed Time (s)</td>
                         </tr>
                         <tr class="text-center">
-                            <td>@CompressionState.Optimizer</td>
-                            <td>@CompressionState.CompressionSummary.Timestamp</td>
-                            <td>@CompressionState.CompressionSummary.ElapsedSeconds</td>
+                            <td>@Optimizer</td>
+                            <td>@CompressionSummary.Timestamp</td>
+                            <td>@CompressionSummary.ElapsedSeconds</td>
                         </tr>
 
                         <tr class="table-success text-center fw-bold">
@@ -221,9 +240,9 @@
                             <td>Norm</td>
                         </tr>
                         <tr class="text-center">
-                            <td>@CompressionState.DatasetName</td>
-                            <td>@CompressionState.K</td>
-                            <td>@CompressionState.Norm</td>
+                            <td>@DatasetName</td>
+                            <td>@K</td>
+                            <td>@Norm</td>
                         </tr>
                     </tbody>
                 </table>
@@ -231,7 +250,7 @@
         </div>
 
         <!---button for figures--->
-        @if (CompressionState.HasFinished)
+        @if (HasFinished)
         {
             <div style="display: flex; gap: 10px; width: 660px; align-items: center; margin: 3px 0;">
                 <button class="action-btn secondary" 
@@ -243,10 +262,10 @@
         }
         
         <!---center images--->
-        @if (showCenterImages && centerImages?.Count > 0 && CompressionState.CompressionSummary != null)
+        @if (showCenterImages && centerImages?.Count > 0 && CompressionSummary != null)
         {
             <div class="image-table">
-                @foreach (var label in DatasetInfoManager.Labels[CompressionState.DatasetName])
+                @foreach (var label in DatasetInfoManager.Labels[DatasetName])
                 {
                     if (centerImages.ContainsKey(label))
                     {

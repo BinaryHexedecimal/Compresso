@@ -59,9 +59,9 @@ builder.Services.AddSingleton(new BackendUrls
 // });
 
 builder.Services.AddScoped<ImageService>();
-builder.Services.AddScoped<CompressionStateService>();
+//builder.Services.AddScoped<CompressionStateService>();
 //builder.Services.AddScoped<SummaryLoadService>();
-builder.Services.AddScoped<TrainStateService>();
+//builder.Services.AddScoped<TrainStateService>();
 builder.Services.AddScoped<DatasetInfoService>();
 builder.Services.AddAntiforgery(options => options.SuppressXFrameOptionsHeader = true);
 builder.Services.Configure<FormOptions>(options =>

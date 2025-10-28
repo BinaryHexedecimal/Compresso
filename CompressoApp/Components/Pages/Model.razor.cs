@@ -32,8 +32,8 @@ public partial class Model: ComponentBase
     protected override async Task OnInitializedAsync()
     {
         modelInfos = await Api.GetSavedModelInfoAsync();
+        
         backendUrls = Services.GetRequiredService<BackendUrls>();
-
         backendUrl = backendUrls.External;
     }
 

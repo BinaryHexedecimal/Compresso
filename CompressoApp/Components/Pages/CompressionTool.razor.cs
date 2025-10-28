@@ -14,17 +14,21 @@ public partial class CompressionTool : ComponentBase, IDisposable
     [Inject] private ApiClient Api { get; set; } = default!;
     [Inject] private NavigationManager NavManager { get; set; } = default!;
     [Inject] private ImageService ImageService { get; set; } = default!;
-    [Inject] private CompressionStateService CompressionState { get; set; } = default!;
-    [Inject] private TrainStateService TrainState { get; set; } = default!;
+    //[Inject] private CompressionStateService CompressionState { get; set; } = default!;
+    //[Inject] private TrainStateService TrainState { get; set; } = default!;
     [Inject] private DatasetInfoService DatasetInfoManager { get; set; } = default!;
     [Inject] private IJSRuntime JS { get; set; } = default!;
+    [Inject] private IServiceProvider Services { get; set; } = default!;
+    private string backendUrl = string.Empty;
+    private BackendUrls? backendUrls;
 
-    [Parameter]
+
+
     public string? CompressionId { get; set; }
 
     private const int numImagesPerRow = 8;
     private Stopwatch? compressionStopwatch;
-    private CancellationTokenSource? cts;
+    //private CancellationTokenSource? cts;
     private Timer? elapsedTimer;
     private string KError = "";
     private string EtaError = "";
@@ -42,24 +46,75 @@ public partial class CompressionTool : ComponentBase, IDisposable
     private string CandidateDuplicateId { get; set; } = "";
 
 
+
+
+    private DotNetObjectReference<CompressionTool>? dotnetRef;
+    private object? sseInstance;
+
+
+
+
+    //-----copy from  state
+    //public string CompressionId { get; set; } = string.Empty;
+
+    // compression settings
+    public string DatasetName { get; set; } = "";
+    public string Norm { get; set; } = "L2";
+    public int K { get; set; } = 10;
+    public double? Eta { get; set; } = null;
+    public string Optimizer { get; set; } = "gurobi";
+
+
+    // compression progress
+    public int ElapsedSeconds { get; set; } = 0;
+    public int Progress { get; set; } = 0;
+    public int Total { get; set; } = 10;
+    public bool IsCompressing { get; set; } = false;
+    public bool IsPreparingForCompression { get; set; } = false;
+    public bool HasFinished { get; set; } = false;
+    public bool IsCancelling { get; set; } = false;
+    //public bool HasCancelled { get; set; } = false;
+    public string ProgressPercent => Total > 0 ? $"{Progress * 100 / Total}%" : "0%";
+
+    // images
+    public Dictionary<string, List<string>> Images { get; set; } = new();
+
+    // compression summary
+    public CompressionSummary? CompressionSummary { get; set; }
+
+
+
+
+
+
+
+
+
     protected async override void OnInitialized()
     {
-        if (NavManager.Uri.EndsWith("/new"))
-        {
-            Clear();
-            var msg = await Api.DeleteAllGraphDataAsync();
-            Console.WriteLine(msg);
-        }
+        // if (NavManager.Uri.EndsWith("/new"))
+        // {
+        Clear();
+        var msg = await Api.DeleteAllGraphDataAsync();
+        Console.WriteLine(msg);
+        // }
+
+        backendUrls = Services.GetRequiredService<BackendUrls>();
+        backendUrl = backendUrls.External;
+
+
+        dotnetRef = DotNetObjectReference.Create(this);
+
 
         // Create a timer that checks every 2 second
         elapsedTimer = new Timer(async _ =>
         {
-            if (CompressionState.IsCompressing)
+            if (IsCompressing)
             {
                 if (compressionStopwatch == null || !compressionStopwatch.IsRunning)
                     compressionStopwatch = Stopwatch.StartNew();
 
-                CompressionState.ElapsedSeconds = (int)compressionStopwatch.Elapsed.TotalSeconds;
+                ElapsedSeconds = (int)compressionStopwatch.Elapsed.TotalSeconds;
                 await InvokeAsync(StateHasChanged);
             }
             else
@@ -76,22 +131,23 @@ public partial class CompressionTool : ComponentBase, IDisposable
 
     private void StateClear()
     {
-        CompressionState.Progress = 0;
-        CompressionState.Total = 10;
-        CompressionState.IsPreparingForCompression = false;
-        CompressionState.ElapsedSeconds = 0;
-        CompressionState.CompressionId = "";
-        CompressionState.IsCompressing = false;
-        CompressionState.Images.Clear();
-        CompressionState.HasFinished = false;
-        //CompressionState.HasCancelled = false;
-        CompressionState.CompressionSummary = null;
+        Progress = 0;
+        Total = 10;
+        IsPreparingForCompression = false;
+        ElapsedSeconds = 0;
+        CompressionId = "";
+        IsCompressing = false;
+        Images.Clear();
+        HasFinished = false;
+        //HasCancelled = false;
+        CompressionSummary = null;
+        IsCancelling = false;
 
-        CompressionState.DatasetName = "";
-        CompressionState.Norm = "L2";
-        CompressionState.K = 10;
-        CompressionState.Eta = null;
-        CompressionState.Optimizer = "gurobi";
+        DatasetName = "";
+        Norm = "L2";
+        K = 10;
+        Eta = null;
+        Optimizer = "gurobi";
 
         StateHasChanged();
     }
@@ -120,139 +176,143 @@ public partial class CompressionTool : ComponentBase, IDisposable
     {
         if (string.IsNullOrWhiteSpace(newDatasetName))
         {
-            CompressionState.DatasetName = string.Empty;
-            CompressionState.Total = 0;
+            DatasetName = string.Empty;
+            Total = 0;
             return;
         }
         Clear();
 
-        CompressionState.DatasetName = newDatasetName;
-        CompressionState.Total = DatasetInfoManager.Labels[CompressionState.DatasetName].Count;
+        DatasetName = newDatasetName;
+        Total = DatasetInfoManager.Labels[DatasetName].Count;
     }
 
 
     private async Task StartCompression()
     {
-        CompressionState.IsCompressing = true;
-        CompressionState.IsPreparingForCompression = true;
-        cts = new CancellationTokenSource();
+        IsCompressing = true;
+        IsPreparingForCompression = true;
+        //cts = new CancellationTokenSource();
         Guid newGuid = Guid.NewGuid();
-        CompressionState.CompressionId = newGuid.ToString();
+        CompressionId = newGuid.ToString();
         var req = new CompressRequest
         {
-            CompressionJobId = CompressionState.CompressionId,
-            OriginDatasetName = CompressionState.DatasetName,
-            K = CompressionState.K,
-            Eta = CompressionState.Eta ?? 0.0,
-            Norm = CompressionState.Norm,
-            Optimizer = CompressionState.Optimizer
+            CompressionJobId = CompressionId,
+            OriginDatasetName = DatasetName,
+            K = K,
+            Eta = Eta ?? 0.0,
+            Norm = Norm,
+            Optimizer = Optimizer
         };
 
-        var startResponse = await Api.StartCompressionAsync(req);
-        // Start streaming progress
-        //await StreamProgressAsync(CompressionState.CompressionId, cts.Token);
-        // Fire-and-forget streaming; don't await
-        if (startResponse?.Success == true)
+
+
+
+
+        var reqJson = JsonSerializer.Serialize(req);
+
+        sseInstance = await JS.InvokeAsync<object>(
+            "startSSEPost",
+            $"{backendUrls!.External}/compress",
+            reqJson,
+            dotnetRef
+        );
+
+    }
+
+
+    [JSInvokable]
+    public async Task ReceiveSSEMessage(JsonElement message)
+    {
+
+        if (message.TryGetProperty("progress", out var prog))
         {
-            await Task.Delay(1000);
-            _ = Task.Run(async () =>
+            Progress = prog.GetInt32();
+            if (Progress == 0)
             {
+                IsPreparingForCompression = false;
+                IsCompressing = true;
+            }
+            StateHasChanged();
+        }
+        if (message.TryGetProperty("total", out var _total))
+        {
+            Total = _total.GetInt32();
+            StateHasChanged();
+        }
+
+        if (message.TryGetProperty("type", out var typeEl))
+        {
+            var type = typeEl.GetString();
+            if (type == "start")
+            {
+                IsPreparingForCompression = true;
+                
+                StateHasChanged();
+            }
+            if (type == "done")
+            {
+                HasFinished = true;
+                IsCompressing = false;
+                Progress = Total;
+                //HasFinished = true;
+                StateHasChanged();
+                await Task.Delay(500);
+                await InvokeAsync(StateHasChanged);
                 try
                 {
-                    await StreamProgressAsync(CompressionState.CompressionId, cts.Token);
+                    CompressionSummary = await Api.GetCompressionSummaryFromMemoryAsync(CompressionId);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Stream error: {ex}");
+                    Console.WriteLine($"Error fetching summary: {ex}");
                 }
-            });
-        }
-        else
-        {
-            Console.WriteLine("Failed to start compression.");
-            CompressionState.IsCompressing = false;
-        }
-
-    }
-
-    private async Task StreamProgressAsync(string compressionId, CancellationToken token)
-    {
-        try
-        {
-            using var stream = await Api.GetStreamCompressionAsync(compressionId, token);
-            using var reader = new StreamReader(stream);
-            while (!reader.EndOfStream && !token.IsCancellationRequested)
+                await InvokeAsync(StateHasChanged);
+            }
+            else if (type == "cancelled")
             {
-                var line = await reader.ReadLineAsync(token);
-                if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data:"))
-                {
-                    await Task.Yield(); // <-- yield even if line ignored
-                    continue;
-                }
-                var json = line.Substring(5).Trim();
-                var update = JsonSerializer.Deserialize<ProgressUpdate>(json);
-                if (update == null) continue;
-                else if (update.Start == true)
-                {
-                    CompressionState.IsPreparingForCompression = false;
-                    await InvokeAsync(StateHasChanged);
-                }
-                else if (update?.Progress != null)
-                {
-                    CompressionState.Progress = update.Progress.Value;
-                    await InvokeAsync(StateHasChanged);
-                    await Task.Yield();
-                }
-                else if (update?.Done == true)
-                {
-                    await Task.Delay(500);
-                    CompressionState.IsCompressing = false;
-                    CompressionState.Progress = CompressionState.Total;
-                    CompressionState.HasFinished = true;
-                    await InvokeAsync(StateHasChanged);
-                    try
+                // handle cancellation
+                //if (!HasFinished)
+                Console.WriteLine("hold da op!");
+                if (!string.IsNullOrEmpty(CompressionId))
                     {
-                        CompressionState.CompressionSummary = await Api.GetCompressionSummaryFromMemoryAsync(CompressionState.CompressionId);
+                        var msg = await Api.DeleteGraphDataAsync(CompressionId);
+                        Console.WriteLine(msg);
                     }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Error fetching summary: {ex}");
-                    }
-                    await InvokeAsync(StateHasChanged);
-                    break;
-                }
+                Clear();
+                StateHasChanged();
+
             }
         }
-        catch (OperationCanceledException)
-        {
-            Clear();
-            await InvokeAsync(StateHasChanged);
-        }
     }
+
+
+
+
 
     private async Task CancelCompression()
     {
-        if (!CompressionState.IsCompressing
-                                || cts == null
-                                || string.IsNullOrEmpty(CompressionState.CompressionId)
-                                ) return;
-        cts.Cancel();
-        await Api.CancelCompressionAsync(CompressionState.CompressionId);
-        await Task.Delay(2000); 
-        if (!CompressionState.HasFinished)
-        {   
-            if (!string.IsNullOrEmpty(CompressionState.CompressionId))
-                {
-                    var msg = await Api.DeleteGraphDataAsync(CompressionState.CompressionId);
-                    Console.WriteLine(msg);
-                }
-            Clear();
-            StateHasChanged();
-        }
-                
-
-
+        if (!IsCompressing || string.IsNullOrEmpty(CompressionId)) 
+            return;
+        IsCancelling = true;
+        IsCompressing = false;
+        await Api.CancelCompressionAsync(CompressionId);
+        //await Task.Delay(200); 
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
     private void Nav(string path) => NavManager.NavigateTo(path);
@@ -298,11 +358,11 @@ public partial class CompressionTool : ComponentBase, IDisposable
     {
         showCenterImages = !showCenterImages;
         if (showCenterImages
-            && CompressionState.CompressionSummary != null
+            && CompressionSummary != null
             && centerImages.Count == 0)
         {
-            string jobId = CompressionState.CompressionSummary.CompressionJobId;
-            var labels = DatasetInfoManager.Labels[CompressionState.DatasetName];
+            string jobId = CompressionSummary.CompressionJobId;
+            var labels = DatasetInfoManager.Labels[DatasetName];
             bool origin = false;
             centerImages = await ImageService.FetchImages(jobId, labels, numImagesPerRow, origin);
             StateHasChanged();
@@ -311,10 +371,10 @@ public partial class CompressionTool : ComponentBase, IDisposable
     }
     private async Task RefreshBatch(string label)
     {
-        if (showCenterImages && CompressionState.CompressionSummary != null)
+        if (showCenterImages && CompressionSummary != null)
         {
             bool origin = false;
-            string jobId = CompressionState.CompressionSummary.CompressionJobId;
+            string jobId = CompressionSummary.CompressionJobId;
             centerImages[label] = await ImageService.FetchImagesForOneLabel(jobId, label, numImagesPerRow, origin);
             StateHasChanged();
         }
@@ -322,14 +382,14 @@ public partial class CompressionTool : ComponentBase, IDisposable
 
     private async Task SaveToContainer()
     {
-        if (string.IsNullOrEmpty(CompressionState.CompressionId))
+        if (string.IsNullOrEmpty(CompressionId))
         {
             SaveMessage = "⚠️No compression ID available.";
             await ShowSaveMessageAsync(SaveMessage, false);
             return;
         }
 
-        var response = await Api.SaveCompressionAsync(CompressionState.CompressionId);
+        var response = await Api.SaveCompressionAsync(CompressionId);
         SaveMessage = response.SaveMessage;
         if (response.RequireUserDecision && response!.SaveMessage!.Contains("Duplicate"))
         {
@@ -360,13 +420,13 @@ public partial class CompressionTool : ComponentBase, IDisposable
 
     private async Task HandleReplaceChoice()
     {
-        if (string.IsNullOrEmpty(CompressionState.CompressionId))
+        if (string.IsNullOrEmpty(CompressionId))
         {
             SaveMessage = "⚠️No compression ID available.";
             await ShowSaveMessageAsync(SaveMessage, false);
             return;
         }
-        var result = await Api.HandleReplaceAsync(CompressionState.CompressionId, CandidateDuplicateId);
+        var result = await Api.HandleReplaceAsync(CompressionId, CandidateDuplicateId);
 
         CandidateDuplicateId = "";
         SaveMessage = result.SaveMessage;
@@ -389,16 +449,16 @@ public partial class CompressionTool : ComponentBase, IDisposable
         Nav($"/Container");
     }
 
-    private void GoToTrain()
-    {
-        Nav($"/Train");
-        TrainState.DefaultDataId = CompressionState.CompressionId!;
-        TrainState.DefaultSummary = CompressionState.CompressionSummary;
+    // private void GoToTrain()
+    // {
+    //     Nav($"/Train");
+    //     DefaultDataId = CompressionId!;
+    //     DefaultSummary = CompressionSummary;
 
-    }
+    // }
     private void ShowGraph(string label)
     {
-        var url = $"/graph/{CompressionState.CompressionId}/{CompressionState.DatasetName}/{label}/{CompressionState.K}";
+        var url = $"/graph/{CompressionId}/{DatasetName}/{label}/{K}";
         JS.InvokeVoidAsync("window.open", url, "_blank");
     }
 
@@ -422,12 +482,12 @@ public partial class CompressionTool : ComponentBase, IDisposable
 
         Console.WriteLine("called Newcpression async ???");
         // Ask backend to delete checkpoints
-        if (!string.IsNullOrEmpty(CompressionState.CompressionId))
+        if (!string.IsNullOrEmpty(CompressionId))
         {
-            var msg = await Api.DeleteGraphDataAsync(CompressionState.CompressionId);
+            var msg = await Api.DeleteGraphDataAsync(CompressionId);
             Console.WriteLine(msg);
         }
-        Console.WriteLine(CompressionState.CompressionId);
+        Console.WriteLine(CompressionId);
         Clear();
 
         //await InvokeAsync(StateHasChanged);

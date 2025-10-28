@@ -18,7 +18,7 @@ def compress_MFC_per_label(label: str,
                            #data_tensor: torch.Tensor,
                            # A: torch.Tensor,
                             req: CompressRequest,
-                            cancel_callback=lambda: False,
+                            #cancel_callback=lambda: False,
                             num_per_center=globals.NUM_IMAGE_INSIDE_ETA,
                         ):
 
@@ -38,9 +38,6 @@ def compress_MFC_per_label(label: str,
 
     data_tensor = obj.stacked_tensor
     
-    if cancel_callback():
-        return None, None
-
     norm_float = globals.NORM_MAP[req.norm]
     mfc_model = MFC(data_tensor, norm=norm_float)
 
@@ -75,15 +72,15 @@ def compress_MFC_per_label(label: str,
     #mfc_model = MFC(data_tensor, norm=norm_float)
     
     # Cancel before heavy operation
-    if cancel_callback():
-        return None, None
+    # if cancel_callback():
+    #     return None, None
 
     compressed_subset, final_eta, sol, t_total = mfc_model.gen_data(A, eta=req.eta, k=req.k, solver=req.optimizer)
     final_eta = float(final_eta)
 
     # Cancel after heavy operation
-    if cancel_callback():
-        return None, None
+    # if cancel_callback():
+    #     return None, None
     
     # satellite nodes images tensor
     center_idx_lst = (torch.nonzero(torch.tensor(sol)).reshape(-1)).tolist()
@@ -131,68 +128,68 @@ def compress_MFC_per_label(label: str,
 
 
 
-def worker_process(req: CompressRequest, 
-                    start_time:float,
-                    progress_queue: multiprocessing.Queue, 
-                    cancel_event: multiprocessing.Event 
-                    ):
+# def worker_process(req: CompressRequest, 
+#                     start_time:float,
+#                     progress_queue: multiprocessing.Queue, 
+#                     cancel_event: multiprocessing.Event 
+#                     ):
 
-    compressed_data_by_label = {}
-    progress_queue.put({"start": True})
-    labels = load_dataset_classes()[req.dataset_name]
-    total = len(labels)
+#     compressed_data_by_label = {}
+#     progress_queue.put({"start": True})
+#     labels = load_dataset_classes()[req.dataset_name]
+#     total = len(labels)
 
-    for i, label in enumerate(labels):
+#     for i, label in enumerate(labels):
        
-        if cancel_event.is_set():
-            progress_queue.put({"cancelled": True, "label": label})
-            return
+#         if cancel_event.is_set():
+#             progress_queue.put({"cancelled": True, "label": label})
+#             return
        
-        compressed_subset = compress_MFC_per_label(
-                                    label, 
-                                    req, 
-                                    cancel_callback = cancel_event.is_set)
-        if compressed_subset is None:
-            progress_queue.put({"cancelled": True})
-            return
+#         compressed_subset = compress_MFC_per_label(
+#                                     label, 
+#                                     req, 
+#                                     cancel_callback = cancel_event.is_set)
+#         if compressed_subset is None:
+#             progress_queue.put({"cancelled": True})
+#             return
 
-        compressed_data_by_label[label] = compressed_subset
+#         compressed_data_by_label[label] = compressed_subset
 
-        progress_queue.put({
-            "progress": i,
-            "total": total,
-            "label": label
-        })
+#         progress_queue.put({
+#             "progress": i,
+#             "total": total,
+#             "label": label
+#         })
 
-    summary = CompressionSummary(
-            compression_id = req.compression_job_id,
-            dataset_name = req.dataset_name,
-            timestamp = datetime.now(),
-            norm = req.norm,
-            k = req.k,
-            elapsed_seconds = int(time.time() - start_time),
-            labels = labels,
-        )
+#     summary = CompressionSummary(
+#             compression_id = req.compression_job_id,
+#             dataset_name = req.dataset_name,
+#             timestamp = datetime.now(),
+#             norm = req.norm,
+#             k = req.k,
+#             elapsed_seconds = int(time.time() - start_time),
+#             labels = labels,
+#         )
     
-    offsets_by_label = {key: 0 for key in labels}
+#     offsets_by_label = {key: 0 for key in labels}
     
     
-    save_path = f"{globals.TMP_DATA_OF_COMPRESSION_DIR}/{req.compression_job_id}_compressed.pt"
+#     save_path = f"{globals.TMP_DATA_OF_COMPRESSION_DIR}/{req.compression_job_id}_compressed.pt"
 
-    torch.save({
-                "compression_id": req.compression_job_id,
-                "compressed_data_by_label": compressed_data_by_label,
-                "summary": summary.model_dump(),  # instead of summary.dict()
-                "offsets_by_label": offsets_by_label,
-                }, save_path)
+#     torch.save({
+#                 "compression_id": req.compression_job_id,
+#                 "compressed_data_by_label": compressed_data_by_label,
+#                 "summary": summary.model_dump(),  # instead of summary.dict()
+#                 "offsets_by_label": offsets_by_label,
+#                 }, save_path)
 
 
-    progress_queue.put({"done": True})
+#     progress_queue.put({"done": True})
     
-    try:
-        progress_queue.close()
-    except:
-        pass
+#     try:
+#         progress_queue.close()
+#     except:
+#         pass
 
 
 

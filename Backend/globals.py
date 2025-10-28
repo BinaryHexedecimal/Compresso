@@ -6,7 +6,8 @@ BUILT_IN_DATASET_NAMES = ["mnist", "cifar10", "cifar100", "svhn"]
 
 USER_DATASET_PERCENT = 100
 
-
+EPS_LINF=0.3,
+EPS_L2=1.5,
 
 NUM_IMAGE_INSIDE_ETA = 7
 MAX_FILES_IN_CONTAINER = 100
@@ -21,7 +22,7 @@ PERMANENT_TRAIN_MODELS_DIR = BASE_DIR / "data" / "permanent_train_models"
 ADJ_MATRIX_DIR = BASE_DIR / "data" / "adj_matrix"
 
 TMP_DATA_FOR_GRAPH_DIR = BASE_DIR / "data" / "tmp" / "gragh"
-TMP_DATA_OF_COMPRESSION_DIR = BASE_DIR / "data" / "tmp" / "compression"
+#TMP_DATA_OF_COMPRESSION_DIR = BASE_DIR / "data" / "tmp" / "compression"
 TMP_TRAIN_CHECKPOINT_DIR = BASE_DIR / "data" / "tmp" / "train"
 
 #TEST_DATA_DIR = BASE_DIR / "data" / "test"

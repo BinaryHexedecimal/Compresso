@@ -1,22 +1,22 @@
 ﻿@page "/train"
-@page "/train/new"
+@* @page "/train/new" *@
 
 @rendermode InteractiveServer
 
 <div class="col-md-8 d-flex align-items-center justify-content-between">
     <!-- Back button -->
-    <div style="width:330px;">
+    @* <div style="width:330px;">
         <button @onclick="GoBackToCompression"
                 class="action-btn primary w-100"
-                disabled="@(TrainState.IsPreparingForTraining
-                            || TrainState.IsTraining 
-                            || TrainState.IsTerminating)">
+                disabled="@(IsPreparingForTraining
+                            || IsTraining 
+                            || IsTerminating)">
             Back to Compression
         </button>
-    </div>
+    </div> *@
 
     <!-- New button or placeholder -->
-    @if (TrainState.HasCompleted || TrainState.HasTerminated)
+    @if (HasCompleted || HasTerminated)
     {
         <div style="width:330px;">
             <button @onclick= "async () => {await NewTrainingAsync();}"
@@ -40,7 +40,7 @@
 
 <div class="row mt-3">
 
-    @if (TrainState.IsTraining)
+    @if (IsTraining)
     {
         <div class="d-flex align-items-center gap-2">
             <button class="btn btn-secondary" disabled style="width:400px">
@@ -49,9 +49,9 @@
             </button>
             <button @onclick="CancelTraining" 
                 class="btn btn-danger"
-                disabled="@(TrainState.IsTerminating)"
+                disabled="@(IsTerminating)"
                 style="width: 240px;">
-                @(TrainState.IsTerminating ? "Terminating..." : "Terminate")
+                @(IsTerminating ? "Terminating..." : "Terminate")
             </button>
         </div>
 
@@ -62,32 +62,32 @@
             <button class="action-btn primary" 
                     style="flex: 0 0 650px"
                     @onclick="()=>StartTrain()"
-                    disabled="@(string.IsNullOrEmpty(TrainState.SelectedTrainingType) 
-                                || string.IsNullOrEmpty(TrainState.FinalDataId)
-                                || TrainState.IsPreparingForTraining
-                                || TrainState.IsTraining
-                                || TrainState.IsTerminating
-                                || TrainState.HasTerminated
-                                || TrainState.HasCompleted)">
+                    disabled="@(string.IsNullOrEmpty(SelectedTrainingType) 
+                                || string.IsNullOrEmpty(FinalDataId)
+                                || IsPreparingForTraining
+                                || IsTraining
+                                || IsTerminating
+                                || HasTerminated
+                                || HasCompleted)">
                 Start Training
             </button>
         </div>
     }
 
 
-    @* @if (TrainState.HasCompleted || TrainState.HasTerminated)
+    @* @if (HasCompleted || HasTerminated)
     {
         <div class="col-md-4 d-flex align-items-center">
             <h5>Results (accuracy):</h5>             
         </div>
     }
-    else if (TrainState.IsPreparingForTraining || TrainState.IsTraining ||TrainState.IsTerminating)
+    else if (IsPreparingForTraining || IsTraining ||IsTerminating)
     {
         <button @onclick="CancelTraining" 
         class="btn btn-danger"
-        disabled="@(TrainState.IsTerminating)"
+        disabled="@(IsTerminating)"
         style="width: 150px;">
-        @(TrainState.IsTerminating ? "Terminating..." : "Terminate")
+        @(IsTerminating ? "Terminating..." : "Terminate")
         </button>
     } *@
 
@@ -103,12 +103,12 @@
     
     <div class="alert alert-success mt-2">
     <h6 style="color: var(--secondary-color);">Selected Dataset:</h6>
-    @if (!string.IsNullOrEmpty(TrainState.FinalDataId) && TrainState.FinalSummary != null)
+    @if (!string.IsNullOrEmpty(FinalDataId) && FinalSummary != null)
     {
         <h6>
-            <span style="color: var(--secondary-color);"> @TrainState.FinalSummary.DatasetName,</span> 
-            <span style="color: var(--secondary-color);"> K = @TrainState.FinalSummary.K, </span>
-            <span style="color: var(--secondary-color);"> Norm = @TrainState.FinalSummary.Norm</span>
+            <span style="color: var(--secondary-color);"> @FinalSummary.DatasetName,</span> 
+            <span style="color: var(--secondary-color);"> K = @FinalSummary.K, </span>
+            <span style="color: var(--secondary-color);"> Norm = @FinalSummary.Norm</span>
         </h6>
 
     }
@@ -119,32 +119,24 @@
 
     <div style="height: 60px;"></div>  
 
-    @if (allSummaries != null && allSummaries.Any())
+    @if (summaries != null && summaries.Any())
     {
         <p>Select a dataset:</p>
         <table class="table table-striped">
             <tbody>
                 @{ int index = 0; }
-                @foreach (var s in allSummaries)
+                @foreach (var s in summaries)
                 {
                     <tr>
                         <td>
                             <strong>@s.DatasetName</strong>, k=@s.K, norm=@s.Norm <br/>
-                            @if (index == 0 && firstRowFromDefault)
-                            {
-                                <span>(from current compressed data)</span>
-                            }
-                            else
-                            {
-                                <span>(from container)</span>
-                            }
                         </td>
                         <td>
                             <button class="btn btn-outline-primary btn-sm"
-                                    disabled="@(TrainState.IsPreparingForTraining || TrainState.IsTraining || TrainState.HasCompleted)"
+                                    disabled="@(IsPreparingForTraining || IsTraining || HasCompleted)"
                                     @onclick="() => SelectData(s.CompressionJobId)"
                                     >
-                                @if (TrainState.FinalDataId == s.CompressionJobId)
+                                @if (FinalDataId == s.CompressionJobId)
                                 {
                                     <span>✅</span>
                                 }
@@ -164,7 +156,7 @@
 
 
     <div>
-    @if (allSummaries == null || !allSummaries.Any())
+    @if (summaries == null || !summaries.Any())
     {   
         <p class="text-muted">No datasets available </p>
     }
@@ -177,27 +169,27 @@
     <h5>Select a train type: </h5>
     <div class="mb-3">
         <select class="form-select" 
-                @bind="TrainState.SelectedTrainingType"
+                @bind="SelectedTrainingType"
                 
-                disabled="@(TrainState.IsPreparingForTraining
-                        || TrainState.IsTraining
-                        || TrainState.HasCompleted)">
+                disabled="@(IsPreparingForTraining
+                        || IsTraining
+                        || HasCompleted)">
             <option value="">-- Choose Type --</option>
             <option value="Standard">Standard Training</option>
             <option value="Adversarial">Adversarial Training</option>
         </select>
     </div>  
 
-    @if (TrainState.SelectedTrainingType == "Standard")
+    @if (SelectedTrainingType == "Standard")
     {
         <div class="mt-3">
             <div class="mb-3">
                 <label class="form-label">Optimizer</label>
                 <select class="form-select" 
-                @bind="TrainState.StandardOptimizer"
-                disabled="@(TrainState.IsPreparingForTraining
-                    ||TrainState.IsTraining
-                    ||TrainState.HasCompleted)">
+                @bind="StandardOptimizer"
+                disabled="@(IsPreparingForTraining
+                    ||IsTraining
+                    ||HasCompleted)">
                     <option>SGD</option>
                     <option>Adam</option>
                 </select>
@@ -206,27 +198,27 @@
                 <label class="form-label">
                     Iterations</label>
                 <input type="number" class="form-control" 
-                @bind="TrainState.StandardItr"
-                disabled="@(TrainState.IsPreparingForTraining
-                    ||TrainState.IsTraining
-                    ||TrainState.HasCompleted)" />
+                @bind="StandardItr"
+                disabled="@(IsPreparingForTraining
+                    ||IsTraining
+                    ||HasCompleted)" />
             </div>
             <div class="mb-3">
                 <label class="form-label">Learning Rate</label>
                 <input type="number" step="0.001" 
                 class="form-control" 
-                @bind="TrainState.StandardLr"
-                disabled="@(TrainState.IsPreparingForTraining
-                            ||TrainState.IsTraining
-                            ||TrainState.HasCompleted)" />
+                @bind="StandardLr"
+                disabled="@(IsPreparingForTraining
+                            ||IsTraining
+                            ||HasCompleted)" />
             </div>
             <div class="mb-3">
                 <label class="form-label">Adv test at the final epoch</label>
                 <InputSelect class="form-select"
-                            @bind-Value="TrainState.RequireFinalAdvAttackTest"
-                            disabled="@(TrainState.IsPreparingForTraining
-                                        || TrainState.IsTraining
-                                        || TrainState.HasCompleted)">
+                            @bind-Value="RequireFinalAdvAttackTest"
+                            disabled="@(IsPreparingForTraining
+                                        || IsTraining
+                                        || HasCompleted)">
                     <option value="true">Yes</option>
                     <option value="false">No</option>
                 </InputSelect>
@@ -234,17 +226,17 @@
         </div>
     }
 
-    @if (TrainState.SelectedTrainingType == "Adversarial")
+    @if (SelectedTrainingType == "Adversarial")
     {
         <div class="mt-3">
 
             <div class="mb-3">
                 <label class="form-label">Attack</label>
                 <select class="form-select" 
-                @bind="TrainState.AdvAttack"
-                disabled="@(TrainState.IsPreparingForTraining
-                            ||TrainState.IsTraining
-                            ||TrainState.HasCompleted)"
+                @bind="AdvAttack"
+                disabled="@(IsPreparingForTraining
+                            ||IsTraining
+                            ||HasCompleted)"
                             >
                     <option>PGD-linf</option>
                     <option>PGD-l2</option>
@@ -256,20 +248,20 @@
                 <label class="form-label">Epsilon (radius)</label>
                 <input type="number" step="0.01" 
                 class="form-control" 
-                @bind="TrainState.AdvEps" 
-                disabled="@(TrainState.IsPreparingForTraining
-                            ||TrainState.IsTraining
-                            ||TrainState.HasCompleted)"/>
+                @bind="AdvEps" 
+                disabled="@(IsPreparingForTraining
+                            ||IsTraining
+                            ||HasCompleted)"/>
             </div>
 
 
             <div class="mb-3">
                 <label class="form-label">Optimizer</label>
                 <select class="form-select" 
-                @bind="TrainState.AdvOptimizer"
-                disabled="@(TrainState.IsPreparingForTraining
-                            ||TrainState.IsTraining
-                            ||TrainState.HasCompleted)">
+                @bind="AdvOptimizer"
+                disabled="@(IsPreparingForTraining
+                            ||IsTraining
+                            ||HasCompleted)">
                     <option>SGD</option>
                     <option>Adam</option>
                 </select>
@@ -277,37 +269,37 @@
             <div class="mb-3">
                 <label class="form-label">Iterations</label>
                 <input type="number" class="form-control" 
-                disabled="@(TrainState.IsPreparingForTraining
-                            ||TrainState.IsTraining
-                            ||TrainState.HasCompleted)"
-                @bind="TrainState.AdvItr" />
+                disabled="@(IsPreparingForTraining
+                            ||IsTraining
+                            ||HasCompleted)"
+                @bind="AdvItr" />
             </div>
             <div class="mb-3">
                 <label class="form-label">Learning Rate</label>
                 <input type="number" step="0.0001" 
-                class="form-control" @bind="TrainState.AdvLr"
-                disabled="@(TrainState.IsPreparingForTraining
-                            ||TrainState.IsTraining
-                            ||TrainState.HasCompleted)"
+                class="form-control" @bind="AdvLr"
+                disabled="@(IsPreparingForTraining
+                            ||IsTraining
+                            ||HasCompleted)"
                             />
             </div>
             <div class="mb-3">
                 <label class="form-label">Alpha</label>
                 <input type="number" step="0.0001" 
-                class="form-control" @bind="TrainState.AdvAlpha"
-                disabled="@(TrainState.IsPreparingForTraining
-                            ||TrainState.IsTraining
-                            ||TrainState.HasCompleted)" />
+                class="form-control" @bind="AdvAlpha"
+                disabled="@(IsPreparingForTraining
+                            ||IsTraining
+                            ||HasCompleted)" />
             </div>
 
 
             <div class="mb-3">
                 <label class="form-label">Adv test at the final epoch</label>
                 <InputSelect class="form-select"
-                            @bind-Value="TrainState.RequireFinalAdvAttackTest"
-                            disabled="@(TrainState.IsPreparingForTraining
-                                        || TrainState.IsTraining
-                                        || TrainState.HasCompleted)">
+                            @bind-Value="RequireFinalAdvAttackTest"
+                            disabled="@(IsPreparingForTraining
+                                        || IsTraining
+                                        || HasCompleted)">
                     <option value="true">Yes</option>
                     <option value="false">No</option>
                 </InputSelect>
@@ -321,54 +313,54 @@
 <!-- Column 3: Results -->
 <div class="col-md-4 ps-4">
    @{
-    bool showAlert = TrainState.IsPreparingForTraining
-                     || TrainState.IsTraining
-                     || TrainState.HasCompleted
-                     || TrainState.IsTerminating
-                     || TrainState.HasTerminated
-                     || TrainState.RequireFinalAdvAttackTest;
+    bool showAlert = IsPreparingForTraining
+                     || IsTraining
+                     || HasCompleted
+                     || IsTerminating
+                     || HasTerminated
+                     || RequireFinalAdvAttackTest;
     }
 
     @if (showAlert)
     {
         <div class="alert alert-success mt-2">
-            @if (TrainState.IsPreparingForTraining)
+            @if (IsPreparingForTraining)
             {
                 <span>Preparing...</span><br/>
             }
-            else if (TrainState.IsTraining)
+            else if (IsTraining)
             {
                 <span>Training...</span><br/>
             }        
-            else if (TrainState.HasCompleted)
+            else if (HasCompleted)
             {
                 <span>Training finished!</span><br/> 
             }
-            else if (TrainState.IsTerminating)
+            else if (IsTerminating)
             {
                 <span>Waiting for terminating...</span><br/> 
             }
-            else if (TrainState.HasTerminated)
+            else if (HasTerminated)
             {
                 <span>Training terminated</span><br/> 
             }
 
-            @if (TrainState.IsTraining || TrainState.HasCompleted 
-                || TrainState.IsTerminating || TrainState.HasTerminated)
+            @if (IsTraining || HasCompleted 
+                || IsTerminating || HasTerminated)
             {
-                <span>Elapsed time: ~ @TrainState.ElapsedSeconds s</span> <br/> 
+                <span>Elapsed time: ~ @ElapsedSeconds s</span> <br/> 
             }
 
            
-            @if (TrainState.HasCompleted || TrainState.HasTerminated)
+            @if (HasCompleted || HasTerminated)
             {
-                <span>Final Epoch (@TrainState.EpochMetrics.Last()["epoch"]):</span> <br/>
-                <span>Test_acc = @FormatValue(TrainState.EpochMetrics.Last()["test_acc"])</span> 
+                <span>Final Epoch (@EpochMetricsList.Last().Epoch]):</span> <br/>
+                <span>Test_acc = @FormatValue(EpochMetricsList.Last().TestAcc)</span> 
             }
-            @if ((TrainState.HasCompleted || TrainState.HasTerminated) && TrainState.RequireFinalAdvAttackTest)
+            @if ((HasCompleted || HasTerminated) && RequireFinalAdvAttackTest)
             {
                
-                <span>, Adv_linf_test = @FormatValue(TrainState.EpochMetrics.Last()["linf_adv_acc"])</span><br/>
+                <span>, Adv_linf_test = @FormatValue(EpochMetricsList.Last().AdvAcc)</span><br/>
             }
             else{
                 <span>&nbsp;</span><br />
@@ -379,7 +371,7 @@
     }
 
 
-    @if (TrainState.EpochMetrics.Any())
+    @if (EpochMetricsList.Any())
     {
 
         @if (!string.IsNullOrEmpty(SaveMessage))
@@ -399,7 +391,7 @@
                     <th>
                         <button 
                             @onclick="SaveModel" 
-                            disabled="@(HasSavedModel ||TrainState.IsPreparingForTraining || TrainState.IsTraining || TrainState.IsTerminating)"                               
+                            disabled="@(HasSavedModel ||IsPreparingForTraining || IsTraining || IsTerminating)"                               
                             class="action-btn primary"
                             style="width: 90px; height: 45px;">
                             Save
@@ -411,18 +403,18 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (var i in Enumerable.Range(0, TrainState.EpochMetrics.Count).Reverse().ToList() )
+                @foreach (var i in Enumerable.Range(0, EpochMetricsList.Count).Reverse().ToList() )
 
                 {
-                    var epoch = TrainState.EpochMetrics[i];
-                    bool isLast = (i == TrainState.EpochMetrics.Count - 1) 
-                            && (TrainState.HasCompleted|| TrainState.HasTerminated);
+                    var metrics = EpochMetricsList[i];
+                    bool isLast = (i == EpochMetricsList.Count - 1) 
+                            && (HasCompleted|| HasTerminated);
                     
                     
                     <tr class="@((isLast) ? "table-success" : "")">
                         <td>
                             <button class="btn btn-outline-primary btn-sm"
-                                    disabled="@(TrainState.IsPreparingForTraining || TrainState.IsTraining || TrainState.IsTerminating || HasSavedModel)"
+                                    disabled="@(IsPreparingForTraining || IsTraining || IsTerminating || HasSavedModel)"
                                     @onclick="() => SelectEpoch(i)"
                                     >                                
                                     @if (selectedEpoch == i)
@@ -435,9 +427,9 @@
                                         }
                             </button>
                         </td>
-                        <td>@epoch["epoch"]</td>
-                        <td>@FormatValue(epoch["train_acc"])</td>
-                        <td>@FormatValue(epoch["test_acc"])</td>
+                        <td>@metrics.Epoch</td>
+                        <td>@FormatValue(metrics.TrainAcc)</td>
+                        <td>@FormatValue(metrics.TestAcc)</td>
                     </tr>
                 }
             </tbody>

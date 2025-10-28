@@ -15,7 +15,7 @@ public partial class Train : ComponentBase, IDisposable
 {
 
     [Inject] private ApiClient Api { get; set; } = default!;
-    [Inject] private TrainStateService TrainState { get; set; } = default!;
+    //[Inject] private TrainStateService TrainState { get; set; } = default!;
     //[Inject] private SummaryLoadService SummaryService { get; set; } = default!;
     [Inject] private IJSRuntime JS { get; set; } = default!;
     [Inject] private NavigationManager NavManager { get; set; } = default!;
@@ -29,13 +29,13 @@ public partial class Train : ComponentBase, IDisposable
     private DotNetObjectReference<Train>? dotnetRef;
     private object? sseInstance;
 
-    private CancellationTokenSource? cts;
+    //private CancellationTokenSource? cts;
     private Timer? elapsedTimer;
     private Stopwatch? trainStopwatch;
 
-    private List<CompressionSummary> summariesFromContainer { get; set; } = new List<CompressionSummary>();
-    private List<CompressionSummary> allSummaries { get; set; } = new List<CompressionSummary>();
-    private bool firstRowFromDefault = false;
+    //private List<CompressionSummary> summariesFromContainer { get; set; } = new List<CompressionSummary>();
+    private List<CompressionSummary> summaries { get; set; } = new List<CompressionSummary>();
+    //private bool firstRowFromDefault = false;
 
     private int selectedEpoch = -1;
     private string SaveMessage = "";
@@ -46,6 +46,65 @@ public partial class Train : ComponentBase, IDisposable
     //private string Mode = "NothingYet";  //"SavedModelMode" or "SetParameterMode"
 
     //private string? SelectedSavedModelId { get; set; } = "";
+
+    //--------------------moved from state
+
+
+    public string CurrentTrainId { get; set; } = "";
+    public string DefaultDataId { get; set; } = "";
+    public CompressionSummary? DefaultSummary { get; set; }
+    public string FinalDataId { get; set; } = "";
+    public CompressionSummary? FinalSummary { get; set; }
+
+
+    // Train settings
+    public string SelectedTrainingType { get; set; } = "";
+    public bool RequireFinalAdvAttackTest { get; set; } = false;
+
+
+    // Standard Training
+    public string StandardOptimizer { get; set; } = "SGD";
+    public int StandardItr { get; set; } = 10;
+    public double StandardLr { get; set; } = 0.01;
+
+    // Adversarial Training
+    public string AdvAttack { get; set; } = "PGD-linf";
+    public double AdvEps { get; set; } = 0.3;
+    public string AdvOptimizer { get; set; } = "Adam";
+    public int AdvItr { get; set; } = 10;
+    public double AdvLr { get; set; } = 0.01;
+    public double AdvAlpha { get; set; } = 0.01;
+
+
+
+    // training progress
+    public int ElapsedSeconds { get; set; } = 0;
+    public bool IsTraining { get; set; } = false;
+    public bool HasCompleted { get; set; } = false;
+    public bool IsPreparingForTraining { get; set; } = false;
+    public bool IsTerminating { get; set; } = false;
+    public bool HasTerminated { get; set; } = false;
+
+    // result
+    public record struct EpochMetrics(int Epoch, double TrainAcc, double TestAcc, double AdvAcc);
+
+    public List<EpochMetrics> EpochMetricsList { get; set; } = new List<EpochMetrics>();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
     protected override async Task OnInitializedAsync()
@@ -68,12 +127,12 @@ public partial class Train : ComponentBase, IDisposable
 
 
 
-            if (TrainState.IsTraining || TrainState.IsTerminating)
+            if (IsTraining || IsTerminating)
             {
                 if (trainStopwatch == null || !trainStopwatch.IsRunning)
                     trainStopwatch = Stopwatch.StartNew();
 
-                TrainState.ElapsedSeconds = (int)trainStopwatch.Elapsed.TotalSeconds;
+                ElapsedSeconds = (int)trainStopwatch.Elapsed.TotalSeconds;
                 await InvokeAsync(StateHasChanged);
             }
             else
@@ -84,32 +143,23 @@ public partial class Train : ComponentBase, IDisposable
         }, null, 0, 1000); // run immediately, tick every 1000ms
 
         dotnetRef = DotNetObjectReference.Create(this);
-        if (NavManager.Uri.EndsWith("/new"))
-        {
+        // if (NavManager.Uri.EndsWith("/new"))
+        // {
             ClearTrainState();
             ClearSetting();
             ClearSummaries();
             //ClearModels();
-        }
-        summariesFromContainer = await Api.LoadAllSummariesFromContainerAsync();
-        if (TrainState.DefaultSummary != null)
-        {
-            allSummaries.Add(TrainState.DefaultSummary);
-            firstRowFromDefault = true;
-        }
-        allSummaries.AddRange(summariesFromContainer);
+        //}
 
-
-
-        //SavedModels = await Api.GetSavedModelInfoAsync(); // Example service call
+        summaries = await Api.LoadAllSummariesFromContainerAsync();
 
     }
 
 
     private void SelectData(string selectedId)
     {
-        TrainState.FinalDataId = selectedId;
-        TrainState.FinalSummary = allSummaries?.FirstOrDefault(d => d.CompressionJobId == selectedId);
+        FinalDataId = selectedId;
+        FinalSummary = summaries?.FirstOrDefault(d => d.CompressionJobId == selectedId);
         StateHasChanged();
     }
 
@@ -119,23 +169,6 @@ public partial class Train : ComponentBase, IDisposable
         StateHasChanged();
     }
 
-    // private async Task SaveModel()
-    // {
-    //     if (selectedEpoch == -1)
-    //     {
-    //         SaveMessage = "⚠️Please select an epoch to save.";
-    //         await ShowSaveMessageAsync(SaveMessage);
-    //         return;
-    //     }
-
-    //     var resultMessage = await Api.SaveModelAsync(selectedEpoch, TrainState.CurrentTrainId);
-
-    //     SaveMessage = resultMessage;     
-    //     HasSavedModel = true;
-
-    //     await ShowSaveMessageAsync(SaveMessage);
-    //     await InvokeAsync(StateHasChanged);
-    // }
 
 
     private async Task SaveModel()
@@ -150,12 +183,12 @@ public partial class Train : ComponentBase, IDisposable
         var info = new SavedModelInfo
         {
             ModelId = Guid.NewGuid().ToString(),
-            DatasetName = TrainState.FinalSummary?.DatasetName ?? "unknown",
-            K = TrainState.FinalSummary?.K ?? -1,
-            Kind = TrainState.SelectedTrainingType ?? "standard"
+            DatasetName = FinalSummary?.DatasetName ?? "unknown",
+            K = FinalSummary?.K ?? -1,
+            Kind = SelectedTrainingType ?? "standard"
         };
 
-        var resultMessage = await Api.SaveModelAsync(selectedEpoch, TrainState.CurrentTrainId, info);
+        var resultMessage = await Api.SaveModelAsync(selectedEpoch+1, CurrentTrainId, info);
 
         SaveMessage = resultMessage;
         HasSavedModel = true;
@@ -185,17 +218,17 @@ public partial class Train : ComponentBase, IDisposable
 
     private async Task StartTrain()
     {
-        TrainState.IsPreparingForTraining = true;
-        TrainState.IsTraining = true;
+        IsPreparingForTraining = true;
+        IsTraining = true;
 
-        cts = new CancellationTokenSource();
+        //cts = new CancellationTokenSource();
 
         // Generate a new UUID / GUID
         Guid newGuid = Guid.NewGuid();
         string trainJobId = newGuid.ToString();
-        TrainState.CurrentTrainId = trainJobId;
+        CurrentTrainId = trainJobId;
         BaseTrainRequest? req = null;
-        if (TrainState.SelectedTrainingType == "Standard" && TrainState.FinalSummary != null)
+        if (SelectedTrainingType == "Standard" && FinalSummary != null)
         {
 
             req = new StandardTrainRequest
@@ -203,39 +236,39 @@ public partial class Train : ComponentBase, IDisposable
                 TrainJobId = trainJobId,
                 Kind = "standard",
                 DataInfo = new Dictionary<string, string>{
-                                            { "dataset_name", TrainState.FinalSummary.DatasetName },
-                                            { "k", TrainState.FinalSummary.K.ToString() },
-                                            { "norm", TrainState.FinalSummary.Norm },
-                                            { "data_id", TrainState.FinalSummary.CompressionJobId },
+                                            { "dataset_name", FinalSummary.DatasetName },
+                                            { "k", FinalSummary.K.ToString() },
+                                            { "norm", FinalSummary.Norm },
+                                            { "data_id", FinalSummary.CompressionJobId },
                 },
-                DataId = TrainState.FinalDataId,
-                Optimizer = TrainState.StandardOptimizer,
-                NumIterations = TrainState.StandardItr,
-                LearningRate = TrainState.StandardLr,
-                RequireAdvAttackTest = TrainState.RequireFinalAdvAttackTest,
+                DataId = FinalDataId,
+                Optimizer = StandardOptimizer,
+                NumIterations = StandardItr,
+                LearningRate = StandardLr,
+                RequireAdvAttackTest = RequireFinalAdvAttackTest,
             };
 
         }
-        else if (TrainState.SelectedTrainingType == "Adversarial" && TrainState.FinalSummary != null)
+        else if (SelectedTrainingType == "Adversarial" && FinalSummary != null)
         {
             req = new AdvTrainRequest
             {
                 TrainJobId = trainJobId,
                 Kind = "adversarial",
                 DataInfo = new Dictionary<string, string>{
-                                            { "dataset_name", TrainState.FinalSummary.DatasetName },
-                                            { "k", TrainState.FinalSummary.K.ToString() },
-                                            { "norm", TrainState.FinalSummary.Norm },
-                                            { "data_id", TrainState.FinalSummary.CompressionJobId },
+                                            { "dataset_name", FinalSummary.DatasetName },
+                                            { "k", FinalSummary.K.ToString() },
+                                            { "norm", FinalSummary.Norm },
+                                            { "data_id", FinalSummary.CompressionJobId },
                 },
-                DataId = TrainState.FinalDataId,
-                Optimizer = TrainState.AdvOptimizer,
-                NumIterations = TrainState.AdvItr,
-                LearningRate = TrainState.AdvLr,
-                Attack = TrainState.AdvAttack,
-                Epsilon = TrainState.AdvEps,
-                Alpha = TrainState.AdvAlpha,
-                RequireAdvAttackTest = TrainState.RequireFinalAdvAttackTest,
+                DataId = FinalDataId,
+                Optimizer = AdvOptimizer,
+                NumIterations = AdvItr,
+                LearningRate = AdvLr,
+                Attack = AdvAttack,
+                Epsilon = AdvEps,
+                Alpha = AdvAlpha,
+                RequireAdvAttackTest = RequireFinalAdvAttackTest,
             };
 
         }
@@ -263,59 +296,45 @@ public partial class Train : ComponentBase, IDisposable
     }
 
     [JSInvokable]
-    public void ReceiveSSEMessage(object msg)
+    public void ReceiveSSEMessage(JsonElement message)
     {
-        if (msg == null) return;
-
-        try
+        if (message.TryGetProperty("type", out var typeElement))
         {
-            if (msg is not JsonElement je) return;
-
-            if (!je.TryGetProperty("type", out var typeElem)) return;
-            string type = typeElem.GetString() ?? "";
+            var type = typeElement.GetString();
             switch (type)
             {
-                case "start":
-                    TrainState.IsPreparingForTraining = false;
-                    TrainState.IsTraining = true;
+                case "epoch":
+
+                    int epoch = message.GetProperty("epoch").GetInt32();
+                    double trainAcc = message.GetProperty("train_acc").GetDouble();
+                    double testAcc = message.GetProperty("test_acc").GetDouble();
+                    double linfAdvAcc = message.GetProperty("linf_adv_acc").GetDouble();
+
+
+                    var metrics = new EpochMetrics(epoch, trainAcc, testAcc, linfAdvAcc);
+
+                    EpochMetricsList.Add(metrics);
                     break;
 
-                case "epoch":
-                    // Build metrics dictionary
-                    var metrics = new Dictionary<string, object>();
 
-                    foreach (var prop in je.EnumerateObject())
-                    {
-                        if (prop.Name == "type") continue;
-                        metrics[prop.Name] = prop.Value.ValueKind switch
-                        {
-                            JsonValueKind.Number when prop.Value.TryGetDouble(out double d) => d,
-                            JsonValueKind.String => prop.Value.GetString() ?? "",
-                            JsonValueKind.True => true,
-                            JsonValueKind.False => false,
-                            _ => prop.Value.ToString() ?? ""
-                        };
-                    }
-                    TrainState.EpochMetrics.Add(metrics);
+                case "start":
+                    IsPreparingForTraining = false;
+                    IsTraining = true;
                     break;
 
                 case "done":
-                    TrainState.IsTraining = false;
-                    TrainState.HasCompleted = true;
+                    IsTraining = false;
+                    HasCompleted = true;
                     break;
 
                 case "error":
                     ClearTrainState();
                     ClearSetting();
-                    string errMsg = je.TryGetProperty("error", out var err)
-                        ? err.GetString() ?? "unknown"
-                        : "unknown";
-                    Console.WriteLine("Training error: " + errMsg);
                     break;
 
                 case "cancelled":
-                    TrainState.IsTerminating = false;
-                    TrainState.HasTerminated = true;
+                    IsTerminating = false;
+                    HasTerminated = true;
                     break;
 
                 default:
@@ -324,20 +343,15 @@ public partial class Train : ComponentBase, IDisposable
             }
             InvokeAsync(StateHasChanged);
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine("Failed to process SSE message: " + ex);
-        }
     }
 
 
     private async Task CancelTraining()
     {
-        if (!TrainState.IsTraining || cts == null || string.IsNullOrEmpty(TrainState.CurrentTrainId)) return;
-        cts.Cancel();
-        await Api.CancelTrainingAsync(TrainState.CurrentTrainId);
-        TrainState.IsTraining = false;
-        TrainState.IsTerminating = true;
+        if (!IsTraining || string.IsNullOrEmpty(CurrentTrainId)) return;
+        await Api.CancelTrainingAsync(CurrentTrainId);
+        IsTraining = false;
+        IsTerminating = true;
         StateHasChanged();
     }
 
@@ -350,54 +364,54 @@ public partial class Train : ComponentBase, IDisposable
         return value?.ToString() ?? "";
     }
 
-    private void GoBackToCompression()
-    {
-        NavManager.NavigateTo($"/Compression");
-    }
+    // private void GoBackToCompression()
+    // {
+    //     NavManager.NavigateTo($"/Compression");
+    // }
 
 
 
 
     private void ClearTrainState()
     {
-        TrainState.IsTraining = false;
-        TrainState.IsPreparingForTraining = false;
-        TrainState.HasCompleted = false;
+        IsTraining = false;
+        IsPreparingForTraining = false;
+        HasCompleted = false;
 
-        TrainState.IsTerminating = false;
-        TrainState.HasTerminated = false;
+        IsTerminating = false;
+        HasTerminated = false;
 
-        TrainState.EpochMetrics.Clear();
-        TrainState.ElapsedSeconds = 0;
+        EpochMetricsList.Clear();
+        ElapsedSeconds = 0;
 
-        TrainState.FinalDataId = "";
-        TrainState.FinalSummary = null;
-        TrainState.CurrentTrainId = "";
+        FinalDataId = "";
+        FinalSummary = null;
+        CurrentTrainId = "";
 
 
-        TrainState.SelectedTrainingType = "";
-        TrainState.RequireFinalAdvAttackTest = false;
+        SelectedTrainingType = "";
+        RequireFinalAdvAttackTest = false;
 
-        TrainState.StandardOptimizer = "SGD";
-        TrainState.StandardItr = 10;
-        TrainState.StandardLr = 0.01;
+        StandardOptimizer = "SGD";
+        StandardItr = 10;
+        StandardLr = 0.01;
 
         // Adversarial Training
-        TrainState.AdvAttack = "PGD-linf";
-        TrainState.AdvEps = 0.3;
-        TrainState.AdvOptimizer = "Adam";
-        TrainState.AdvItr = 10;
-        TrainState.AdvLr = 0.01;
-        TrainState.AdvAlpha = 0.01;
+        AdvAttack = "PGD-linf";
+        AdvEps = 0.3;
+        AdvOptimizer = "Adam";
+        AdvItr = 10;
+        AdvLr = 0.01;
+        AdvAlpha = 0.01;
 
         StateHasChanged();
     }
 
     private void ClearSummaries()
     {
-        summariesFromContainer?.Clear();
-        allSummaries.Clear();
-        firstRowFromDefault = false;
+        //summariesFromContainer?.Clear();
+        summaries.Clear();
+        //firstRowFromDefault = false;
         StateHasChanged();
     }
 
@@ -422,32 +436,6 @@ public partial class Train : ComponentBase, IDisposable
 
 
 
-    // private void OnSavedModelChanged(ChangeEventArgs e)
-    // {
-    //     SelectedSavedModelId = e.Value?.ToString() ?? "";
-
-    //     if (!string.IsNullOrEmpty(SelectedSavedModelId))
-    //         Mode = "SavedModelMode";
-    //     else if (!string.IsNullOrEmpty(TrainState.SelectedTrainingType))
-    //         Mode = "SetParameterMode";
-    //     else
-    //         Mode = "NothingYet";
-    // }
-
-
-    // private void OnTrainingTypeChanged(ChangeEventArgs e)
-    // {
-    //     TrainState.SelectedTrainingType = e.Value?.ToString() ?? "";
-
-    //     if (!string.IsNullOrEmpty(TrainState.SelectedTrainingType))
-    //         Mode = "SetParameterMode";
-    //     else if (!string.IsNullOrEmpty(SelectedSavedModelId))
-    //         Mode = "SavedModelMode";
-    //     else
-    //         Mode = "NothingYet";
-    // }
-
-
 
     private async Task NewTrainingAsync()
     {
@@ -455,9 +443,9 @@ public partial class Train : ComponentBase, IDisposable
 
 
         // Ask backend to delete checkpoints
-        if (!string.IsNullOrEmpty(TrainState.CurrentTrainId))
+        if (!string.IsNullOrEmpty(CurrentTrainId))
         {
-            var msg = await Api.DeleteCheckpointsAsync(TrainState.CurrentTrainId);
+            var msg = await Api.DeleteCheckpointsAsync(CurrentTrainId);
             Console.WriteLine(msg);
         }
         ClearTrainState();
