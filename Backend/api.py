@@ -48,6 +48,49 @@ async def lifespan(app: FastAPI):
     # --- Startup phase ---
     print("Starting backend initialization...")
 
+    # ✅ Ensure all required directories exist (add this block)
+    for d in [
+        globals.RAW_DATA_DIR,
+        globals.COMPRESSION_CONTAINER_DIR,
+        globals.DATA_PER_LABEL_DIR,
+        globals.PERMANENT_TRAIN_MODELS_DIR,
+        globals.ADJ_MATRIX_DIR,
+        globals.TMP_DATA_FOR_GRAPH_DIR,
+        globals.TMP_DATA_OF_COMPRESSION_DIR,
+        globals.TMP_TRAIN_CHECKPOINT_DIR,
+    ]:
+        d.mkdir(parents=True, exist_ok=True)
+        # Optional: log which ones were created
+        if not any(d.iterdir()):
+            print(f"Created empty directory: {d}")
+        else:
+            print(f"Directory exists: {d}")
+
+
+    # ✅ Ensure key registry files exist
+    registry_files = {
+        globals.REGISTRY_LABELS_PATH: {},           # dataset_classes.json → empty dict
+        globals.REGISTRY_ACTIVE_DATASETS_PATH: [],  # active_datasets.json → empty list
+        globals.TRAINING_HISTORY_PATH: [],          # train_history.json → empty list
+    }
+
+    for path, default_content in registry_files.items():
+        if not path.exists():
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(default_content, f, indent=2)
+                print(f"Created {path.name} with default content.")
+            except Exception as e:
+                print(f"⚠️ Could not create {path.name}: {e}")
+        else:
+            print(f"{path.name} already exists, skipping.")
+
+
+
+
+
+
+
     app.state.compression_jobs = {}
     app.state.training_jobs = {}
     app.state.compressed_data_dict = {}

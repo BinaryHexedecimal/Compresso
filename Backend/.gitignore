@@ -8,13 +8,4 @@ backup/
 fig/
 results/
 
-*.pt 
-*.png
-*.jpg 
-*.jpeg 
-*.bmp 
-*.gif 
-*.tiff
-
-
-*json
+data/
