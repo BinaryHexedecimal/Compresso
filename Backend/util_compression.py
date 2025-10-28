@@ -1,10 +1,3 @@
-#from torch.utils.data import Dataset, DataLoader
-#import torch.nn as nn
-#import torch.nn.functional as F
-#from torchvision import datasets, transforms
-#import plotly.graph_objects as go
-#import sys
-
 import torch
 from src import MFC
 import multiprocessing
@@ -34,36 +27,62 @@ def compress_MFC_per_label(label: str,
     Supports early cancellation via cancel_callback.
     Works in multiprocessing.Process architecture.
     """
-    print(f"has entered MFC_per_label???")
-    path = f"{globals.DATA_PER_LABEL_DIR}/{req.dataset_name}/{label}.pt"
+    if req.dataset_name in globals.BUILT_IN_DATASET_NAMES:
+        path = f"{globals.DATA_PER_LABEL_DIR}/{req.dataset_name}_percent_{globals.BUILT_IN_DATASET_PERCENT}/{label}.pt"
+    else:
+        path = f"{globals.DATA_PER_LABEL_DIR}/{req.dataset_name}_percent_{globals.USER_DATASET_PERCENT}/{label}.pt"
+
+
+    #path = f"{globals.DATA_PER_LABEL_DIR}/{req.dataset_name}_percent_{globals.BUILT_IN_DATASET_PERCENT}/{label}.pt"
     obj = torch.load(path, weights_only=False)
 
     data_tensor = obj.stacked_tensor
-    A = obj.adjMatrix_dict[req.norm]
-
-    # Early cancel check
+    
     if cancel_callback():
-        print("Cancelled before starting MFC")
         return None, None
+
     norm_float = globals.NORM_MAP[req.norm]
     mfc_model = MFC(data_tensor, norm=norm_float)
 
+    if req.dataset_name in globals.BUILT_IN_DATASET_NAMES:
+        subdir = f"{req.dataset_name}_percent_{globals.BUILT_IN_DATASET_PERCENT}"
+    else:
+        subdir = f"{req.dataset_name}_percent_{globals.USER_DATASET_PERCENT}"
+
+    # Folder where the .pt file will be stored
+    A_dir = os.path.join(globals.ADJ_MATRIX_DIR, subdir)
+
+    # ✅ Ensure the subfolder exists
+    os.makedirs(A_dir, exist_ok=True)
+
+    # File path for this label and norm
+    A_path = os.path.join(A_dir, f"norm_{req.norm}_label_{label}.pt")
+    print(A_path)
+
+    if not os.path.exists(A_path):
+        # Compute and save
+        A = mfc_model.distanceMatrix()
+        torch.save(A, A_path)
+        print(f"Matrix A computed and saved to {A_path}")
+    else:
+        # Load existing tensor
+        A = torch.load(A_path)
+        print(f"Matrix A loaded from {A_path}")
+
+
+
+    #norm_float = globals.NORM_MAP[req.norm]
+    #mfc_model = MFC(data_tensor, norm=norm_float)
+    
     # Cancel before heavy operation
     if cancel_callback():
-        print("Cancelled before gen_data")
         return None, None
 
-
-    print(f"has entered her 1111???")
     compressed_subset, final_eta, sol, t_total = mfc_model.gen_data(A, eta=req.eta, k=req.k, solver=req.optimizer)
     final_eta = float(final_eta)
 
-
-    print(f"has entered her 2222???")
-
     # Cancel after heavy operation
     if cancel_callback():
-        print("Cancelled after gen_data")
         return None, None
     
     # satellite nodes images tensor
@@ -73,24 +92,20 @@ def compress_MFC_per_label(label: str,
     for c in center_idx_lst:
         selected_indices  = select_indices(A,  c , final_eta, num_per_center)
         satellite_idx_set.update(selected_indices)
-    print(f"has entered her 333333???")
+
     # remove overlap with center list
     satellite_idx_set -= set(center_idx_lst)
 
     satellite_idx_lst = list(satellite_idx_set)
 
     nodes_lst = center_idx_lst + satellite_idx_lst
-    print(f"has entered her 444444???")
-    print(nodes_lst)
     nodes_tensor = data_tensor[nodes_lst].detach().cpu()
     compressed_subset = compressed_subset.detach().cpu() if isinstance(compressed_subset, torch.Tensor) else compressed_subset
-    print(f"has entered her 555555???")
     # G
     mat = to_numpy_matrix(A)
     m = len(nodes_lst)
     submat = mat[np.ix_(nodes_lst, nodes_lst)]
     G = nx.Graph()
-    print(f"has entered her 777777???")
     # Add nodes
     G.add_nodes_from(range(m))
     # Add edges based on threshold
@@ -100,16 +115,6 @@ def compress_MFC_per_label(label: str,
                 G.add_edge(i, j, weight=float(submat[i, j]))  # ensure float, not numpy.float32
     
     
-    
-    # save_path = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/visualization_{label}_{req.compression_job_id}.gpickle"
-
-
-    # with open(save_path, "wb") as f:
-    #     pickle.dump(G, f)
-    # print(f"has entered her 8888888???")
-    # return compressed_subset, nodes_tensor
-
-
 
     os.makedirs(globals.TMP_DATA_FOR_GRAPH_DIR, exist_ok=True)
     base = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{req.compression_job_id}"
@@ -122,7 +127,6 @@ def compress_MFC_per_label(label: str,
 
     torch.save(nodes_tensor, tensor_path)
 
-    print(f"✅ Saved {graph_path} and {tensor_path}", flush=True)
     return compressed_subset
 
 
@@ -131,12 +135,9 @@ def worker_process(req: CompressRequest,
                     start_time:float,
                     progress_queue: multiprocessing.Queue, 
                     cancel_event: multiprocessing.Event 
-                    #result_queue: multiprocessing.Queue
                     ):
 
-    print("begin a worker ?")
     compressed_data_by_label = {}
-    #nodes_by_label = {}
     progress_queue.put({"start": True})
     labels = load_dataset_classes()[req.dataset_name]
     total = len(labels)
@@ -145,21 +146,17 @@ def worker_process(req: CompressRequest,
        
         if cancel_event.is_set():
             progress_queue.put({"cancelled": True, "label": label})
-            #result_queue.put(None)   # mark no result
             return
        
         compressed_subset = compress_MFC_per_label(
                                     label, 
                                     req, 
                                     cancel_callback = cancel_event.is_set)
-        print(f"for label {label}, finish compress_MFC_label")
         if compressed_subset is None:
             progress_queue.put({"cancelled": True})
-            #result_queue.put(None)
             return
 
         compressed_data_by_label[label] = compressed_subset
-        #nodes_by_label[label] = nodes_tensor
 
         progress_queue.put({
             "progress": i,
@@ -167,7 +164,6 @@ def worker_process(req: CompressRequest,
             "label": label
         })
 
-    print(f"begin to make for summary")
     summary = CompressionSummary(
             compression_id = req.compression_job_id,
             dataset_name = req.dataset_name,
@@ -181,25 +177,7 @@ def worker_process(req: CompressRequest,
     offsets_by_label = {key: 0 for key in labels}
     
     
-    
-    
-    #result_queue.put((compressed_data_by_label, nodes_by_label, summary, offsets_by_label))
-    
-    #compressed_data_by_label, nodes_by_label, summary, offsets_by_label = result
-    # compressed_dataset_obj =  CompressedDatasetObj(
-    #                                 compression_id = req.compression_job_id, 
-    #                                 compressed_data_by_label= compressed_data_by_label,
-    #                                 #nodes_by_label = nodes_by_label,
-    #                                 summary = summary, 
-    #                                 offsets_by_label = offsets_by_label,
-    #                                 )
     save_path = f"{globals.TMP_DATA_OF_COMPRESSION_DIR}/{req.compression_job_id}_compressed.pt"
-    # torch.save({
-    #     "compression_id": req.compression_job_id,
-    #     "compressed_data_by_label": compressed_data_by_label,
-    #     "summary": summary.dict() if hasattr(summary, "dict") else summary.__dict__,
-    #     "offsets_by_label": offsets_by_label,
-    # }, save_path)
 
     torch.save({
                 "compression_id": req.compression_job_id,
@@ -211,7 +189,6 @@ def worker_process(req: CompressRequest,
 
     progress_queue.put({"done": True})
     
-    print(f"summary is ready")
     try:
         progress_queue.close()
     except:
@@ -263,17 +240,3 @@ def select_indices(matrix, k, threshold, num_samples):
 
     # Return as Python ints
     return [int(idx) for idx in selected_indices]
-
-
-
-
-# def deep_getsizeof(o, ids=set()):
-#     if id(o) in ids:
-#         return 0
-#     r = sys.getsizeof(o)
-#     ids.add(id(o))
-#     if isinstance(o, dict):
-#         r += sum(deep_getsizeof(k, ids) + deep_getsizeof(v, ids) for k, v in o.items())
-#     elif isinstance(o, (list, tuple, set, frozenset)):
-#         r += sum(deep_getsizeof(i, ids) for i in o)
-#     return r

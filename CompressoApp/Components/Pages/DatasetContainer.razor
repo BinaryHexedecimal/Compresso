@@ -62,12 +62,26 @@
         <!-- RIGHT COLUMN: Placeholder -->
         <div class="col-md-8 ps-4">
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <button class="action-btn primary" 
-                    disabled= "@isUploading"
-                    @onclick="ShowUploadDialog">
-                    @(isUploading? "uploading..." : "Upload Dataset")
-                </button>
+                @if (isUploading)
+                {
+                    <button class="btn btn-secondary" disabled >
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                        &nbsp;Running...
+                    </button>
+                }
+                else
+                {
+                    <button class="action-btn primary" 
+                        disabled= "@isUploading"
+                        @onclick="ShowUploadDialog">
+                        Upload Dataset
+                    </button>
+                }
+
+
+
             </div>
+
             @if (showUpload)
             {
                 <div class="upload-panel border p-3 rounded shadow-sm bg-light">

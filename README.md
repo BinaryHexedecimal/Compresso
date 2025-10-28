@@ -66,7 +66,7 @@ cd Compresso
 
 #### 2. Prepare the Gurobi license
 
-The project includes three optimizers for linear optimization, among which **Gurobi** is the most effective and recommended.  
+The project includes three optimizers (CBC,SCIP,Gurobi) for linear optimization, among which **Gurobi** is the most effective and recommended.  
 It requires a license for personal or academic use. You can apply for one at [https://www.gurobi.com](https://www.gurobi.com) under **Gurobi WLS (Web License Service)**.
 
 If you already have a local license, note that running inside Docker requires a **WLS license**.  

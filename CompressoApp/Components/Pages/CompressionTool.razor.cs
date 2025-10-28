@@ -17,6 +17,7 @@ public partial class CompressionTool : ComponentBase, IDisposable
     [Inject] private CompressionStateService CompressionState { get; set; } = default!;
     [Inject] private TrainStateService TrainState { get; set; } = default!;
     [Inject] private DatasetInfoService DatasetInfoManager { get; set; } = default!;
+    [Inject] private IJSRuntime JS { get; set; } = default!;
 
     [Parameter]
     public string? CompressionId { get; set; }

@@ -1,30 +1,18 @@
-#from urllib import request
-#from fastapi.encoders import jsonable_encoder
-# from datetime import datetime
-# from io import BytesIO
-# from typing import Optional
-# from uuid import uuid4
-#import networkx as nx
-# from networkx.readwrite import json_graph
-#from pydantic import BaseModel
-#from torch.utils.data import Dataset, DataLoader
-#from multiprocessing import Process, Queue, Event
-
-
-from fastapi import FastAPI, HTTPException, status, UploadFile, File
-from fastapi.responses import StreamingResponse, Response, JSONResponse  #HTMLResponse
+from fastapi import FastAPI, HTTPException, status, UploadFile, File, Query
+from fastapi.responses import StreamingResponse, Response, JSONResponse, FileResponse  #HTMLResponse
 import plotly.io as pio
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import multiprocessing as mp
 from contextlib import asynccontextmanager
-#import uvicorn
 import asyncio
 import pickle
 import time
 import shutil
 import os
 import zipfile
+import torch
+
 
 
 import globals
@@ -58,7 +46,7 @@ async def lifespan(app: FastAPI):
     """Unified lifecycle: handles startup + shutdown."""
 
     # --- Startup phase ---
-    print("🚀 Starting backend initialization...")
+    print("Starting backend initialization...")
 
     app.state.compression_jobs = {}
     app.state.training_jobs = {}
@@ -71,17 +59,15 @@ async def lifespan(app: FastAPI):
             for file in path.iterdir():
                 if file.is_file():
                     file.unlink()
-            print(f"✅ Cleared all files in {path}")
+            print(f"Cleared all files in {path}")
 
     # Preload standard datasets
-    for id in ["mnist", "cifar10", "cifar100", "svhn"]:
-        # create_origin_data_obj(id, percent=10)
-        # create_test_data_obj(id, percent=20)
-                # delete the raw data, which is usually large and will not be used any longer
-        preprocess_data_to_obj(id, train_percent=100, test_percent=100)
+    for id in globals.BUILT_IN_DATASET_NAMES:
+        #preprocess_data_to_obj(id, train_percent=10, test_percent=20)
         #preprocess_data_to_obj(id, train_percent=10, test_percent=10)
-
-
+        prepare_train_data(id, percent=globals.BUILT_IN_DATASET_PERCENT)
+        prepare_test_data(id)
+        
 
     print("✅ All global state initialized")
     print("✅ Backend startup complete.")
@@ -119,53 +105,6 @@ async def lifespan(app: FastAPI):
 # ------------------ FastAPI app ------------------
 
 app = FastAPI(lifespan=lifespan)
-
-
-
-
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     #app.state.MAX_CONCURRENT_COMPRESSION_JOBS = 5 #no use yes
-#     #app.state.MAX_CONCURRENT_TRAINING_JOBS = 5 #no use yes
-#     #app.state.MAX_MEMORY_DATA_NUM = 20
-    
-#     app.state.compression_jobs = {}
-#     app.state.training_jobs = {}
-#     app.state.compressed_data_dict = {}
-
-
-#     for id in ["mnist", "cifar10", "cifar100", "svhn"]:
-#         create_origin_data_obj(id, percent=10)
-#         create_test_data_obj(id, percent=15)
-        
-#         # delete the raw data, which is usually large and will not be used any longer
-#         folder = globals.TMP_RAW_DATA_DIR / id
-
-#         if folder.exists() and folder.is_dir():
-#             shutil.rmtree(folder)   # Recursively delete the folder and all its contents
-#             print(f"🧹 Deleted dataset folder: {folder}")
-#         else:
-#             print(f"⚠️ Folder does not exist: {folder}")
-
-
-
-#     print("✅All global state initialized")
-
-#     yield
-
-#     # --- cleanup ---
-#     for attr in [
-#         "compression_jobs",
-#         "training_jobs",
-#         "compressed_data_dict",
-#     ]:
-#         if hasattr(app.state, attr):
-#             getattr(app.state, attr).clear()
-
-
-# # ------------------ FastAPI app ------------------
-# app = FastAPI(lifespan=lifespan)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -182,19 +121,16 @@ async def start_compression(req: CompressRequest):
     
     cancel_event = multiprocessing.Event()
     progress_queue = multiprocessing.Queue()
-    #result_queue = multiprocessing.Queue() 
-    print("begin in start_compresion?")
+
     proc = multiprocessing.Process(
         target = worker_process,
         args = (req, start_time, progress_queue, cancel_event)
     )
-    print("finished MFC_by_label?")
 
     app.state.compression_jobs[req.compression_job_id] = {
         "process": proc,
         "queue": progress_queue,
         "cancel": cancel_event
-        #"results": result_queue,
     }
     proc.start()
     # launch track_compression_completion in background
@@ -232,23 +168,15 @@ def cancel_compression(compression_job_id: str):
 
 
 async def track_compression_completion(compression_job_id: str):
-    print("has enter track_compression_competion????")
     job = app.state.compression_jobs.get(compression_job_id)
     if not job:
         return
     proc = job["process"]
-    #result_queue = job["results"]
 
     # Wait for process to finish
     while proc.is_alive():
         await asyncio.sleep(0.1)
     
-    # try:
-    #     # block briefly to allow result to be delivered
-    #     result = result_queue.get(timeout=100)
-    # except Exception:
-    #     result = None
-
     proc.join()  # wait for completion
     # Clean up the job
     await asyncio.sleep(1)
@@ -265,39 +193,20 @@ async def track_compression_completion(compression_job_id: str):
                                 summary = obj["summary"],
                                 offsets_by_label = obj["offsets_by_label"],
                                 )
-    # if result is None:
-    #     print("No result from worker; likely cancelled or crashed")
-    # else:
-    #     compressed_data_by_label, nodes_by_label, summary, offsets_by_label = result
-    #     compressed_dataset_obj =  CompressedDatasetObj(
-    #                                 compression_id = compression_job_id, 
-    #                                 compressed_data_by_label= compressed_data_by_label,
-    #                                 nodes_by_label = nodes_by_label,
-    #                                 summary = summary, 
-    #                                 offsets_by_label = offsets_by_label,
-    #                                 )
-    #     # Save in memory
+
     app.state.compressed_data_dict[compression_job_id] = compressed_dataset_obj
-
-    # for key in app.state.compressed_data_dict.keys():
-    #     print(key)
-    # Optional eviction
-    # if len(app.state.compressed_data_dict) > app.state.MAX_MEMORY_DATA_NUM:
-    #     container_for_timestamps = {
-    #             obj_id: obj.summary.timestamp
-    #             for obj_id, obj in app.state.compressed_data_dict.items()
-    #         }
-    #     oldest = min(container_for_timestamps, key = container_for_timestamps.get)
-    #     app.state.compressed_data_dict.pop(oldest, None)
-    #     print("Has evicted the oldest in the memory due to memory limitaton")
-
 
 
 
 # ------------------ Image supports  ------------------
 @app.get("/sample_origin_images")
 def sample_origin_images(dataset_name: str, label: str, n: int):
-    path = f"{globals.DATA_PER_LABEL_DIR}/{dataset_name}/{label}.pt"
+    if dataset_name in globals.BUILT_IN_DATASET_NAMES:
+        path = f"{globals.DATA_PER_LABEL_DIR}/{dataset_name}_percent_{globals.BUILT_IN_DATASET_PERCENT}/{label}.pt"
+    else:
+        path = f"{globals.DATA_PER_LABEL_DIR}/{dataset_name}_percent_{globals.USER_DATASET_PERCENT}/{label}.pt"
+
+        
     obj = torch.load(path, weights_only=False)
     dataset_for_one_label = obj.stacked_tensor
     
@@ -336,11 +245,8 @@ def get_graph_json_data(compression_job_id: str, label: str, k: int):
 
 @app.get("/get_node_image/{compression_job_id}/{label}/{node_index}")
 def get_node_image(compression_job_id: str, label: str, node_index: int):
-    #data_obj = app.state.compressed_data_dict[compression_job_id]
     read_path = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{compression_job_id}_nodes.pt"
     nodes =torch.load(read_path, map_location="cpu", weights_only=False)
-
-    #nodes = data_obj.nodes_by_label[label]
     image_tensor = nodes[node_index]
     img_bytes = tensor_to_image_bytes(image_tensor)
     return Response(content=img_bytes, media_type="image/png")
@@ -357,10 +263,10 @@ def delete_graphs(compressionId: str):
             file.unlink()
             deleted_files += 1
         except Exception as e:
-            print(f"⚠️ Could not delete {file}: {e}")
+            print(f"Could not delete {file}: {e}")
     return JSONResponse(content={
         "status": "success",
-        "message": f"🧹 Deleted {deleted_files} graph files for compressionId '{compressionId}'."
+        "message": f"🧹Deleted {deleted_files} graph files for compressionId '{compressionId}'."
     })
 
 @app.delete("/delete_all_graph_data")
@@ -374,19 +280,17 @@ def delete_all_graph():
         })
 
     deleted_files = 0
-
-    # 🧹 Delete all files in the directory
     for file in folder_dir.iterdir():
         if file.is_file():
             try:
                 file.unlink()
                 deleted_files += 1
             except Exception as e:
-                print(f"⚠️ Could not delete {file}: {e}")
+                print(f"Could not delete {file}: {e}")
 
     return JSONResponse(content={
         "status": "success",
-        "message": f"🧹 Deleted {deleted_files} graph files."
+        "message": f"🧹Deleted {deleted_files} graph files."
     })
 
 
@@ -489,7 +393,7 @@ def delete_all_container_data():
                     file.unlink()
                     deleted_files += 1
                 except Exception as e:
-                    print(f"⚠️ Failed to delete {file}: {e}")
+                    print(f"⚠️Failed to delete {file}: {e}")
 
         return JSONResponse(content={
             "status": "success",
@@ -497,7 +401,7 @@ def delete_all_container_data():
         })
 
     except Exception as e:
-        print(f"❌ Error clearing container data: {e}")
+        print(f"❌Error clearing container data: {e}")
         return JSONResponse(
             content={
                 "status": "error",
@@ -548,11 +452,14 @@ def save_in_container(compression_job_id: str):
                     "DuplicateId": saved_summary.get("compression_id")
                 })
 
-    # Convert compressed dict to trainable data_obj
-    data_obj = prepare_trainable_data_obj(compressed_obj.compressed_data_by_label, dataset_name = dataset_name)
+    # Save .pt 
+    save_trainable_data_in_container(
+                            compressed_obj.compressed_data_by_label, 
+                            compression_job_id,
+                            dataset_name = dataset_name)
 
-    # Save .pt and summary
-    torch.save(data_obj, os.path.join(file_dir, f"{compression_job_id}_compressed_data.pt"))
+    # Save summary
+    #torch.save(data_obj, os.path.join(file_dir, f"{compression_job_id}_compressed_data.pt"))
     with open(os.path.join(file_dir, f"{compression_job_id}_summary.json"), "w") as f:
         f.write(compressed_obj.summary.json())
 
@@ -624,9 +531,11 @@ def handle_replace_choice(compression_job_id: str, duplicate_id: Optional[str] =
 
         # --- Save new compressed results ---
         dataset_name = compressed_obj.summary.dataset_name
-        data_obj = prepare_trainable_data_obj(compressed_obj.compressed_data_by_label, dataset_name=dataset_name)
+        save_trainable_data_in_container(compressed_obj.compressed_data_by_label, 
+                                             compression_job_id,
+                                             dataset_name=dataset_name)
 
-        torch.save(data_obj, file_dir / f"{compression_job_id}_compressed_data.pt")
+        
         with open(file_dir / f"{compression_job_id}_summary.json", "w") as f:
             f.write(compressed_obj.summary.json())
 
@@ -652,7 +561,23 @@ def handle_replace_choice(compression_job_id: str, duplicate_id: Optional[str] =
 
 
 
-# ------------------ Dataset supports  ------------------
+
+
+@app.get("/download_compressed_data/{compressionJobId}")
+def download_compressed_data(compressionJobId: str, display_name: str | None = Query(default=None)):
+    
+    file_path = globals.COMPRESSION_CONTAINER_DIR / f"{compressionJobId}_compressed_data.pt"
+    if not file_path.exists():
+        return {"error": f"Data {compressionJobId} not found."}
+
+    # sanitize fallback
+    filename = display_name if display_name else f"{compressionJobId}.pt"
+    return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
+
+
+
+
+# ------------------User Dataset supports  ------------------
 
 @app.get("/get_all_dataset_names", response_model=list[str])
 def get_all_dataset_names():
@@ -679,78 +604,26 @@ def delete_dataset(dataset_name: str):
         raise HTTPException(status_code=404, detail="No dataset found for given dataset name")
 
     # --- Define directories to delete ---
-    path_to_delete = os.path.join(globals.DATA_PER_LABEL_DIR, dataset_name)
-
-    #deleted_paths = []
-    #skipped_paths = []
-
+    paths_to_delete = [os.path.join(globals.DATA_PER_LABEL_DIR, dataset_name + f"_percent_{globals.USER_DATASET_PERCENT}"),
+                        os.path.join(globals.RAW_DATA_DIR, dataset_name),
+                        os.path.join(globals.ADJ_MATRIX_DIR, dataset_name) + f"_percent_{globals.USER_DATASET_PERCENT}"
+                        ]
     # --- Attempt deletion for each path ---
-    #for path in paths_to_delete:
-    success_delete_data = False
-    if os.path.exists(path_to_delete):
-        try:
-            shutil.rmtree(path_to_delete)
-            #deleted_paths.append(path)
-            success_delete_data = True
-            print(f"Deleted directory: {path_to_delete}")
-        except Exception as e:
-            print(f"Failed to delete {path_to_delete}: {e}")
-                #skipped_paths.append({"path": path, "error": str(e)})
-        #else:
-            #skipped_paths.append({"path": path, "error": "Not found"})
-    
-    ### we have decided to keep the test data, even though the original dataset is to be
-    ### deleted, because the remained compressed data may be used for training. In the case
-    ### test data is useful.
-    # --- Try deleting the test .pt file ---
-    # test_file_path = globals.TEST_DATA_DIR / f"{dataset_name}_test.pt"
-    # if os.path.exists(test_file_path):
-    #     try:
-    #         os.remove(test_file_path)
-    #         deleted_paths.append(test_file_path)
-    #         print(f"🧹 Deleted test file: {test_file_path}")
-    #     except Exception as e:
-    #         print(f"⚠️ Failed to delete test file {test_file_path}: {e}")
-    #         skipped_paths.append({"path": test_file_path, "error": str(e)})
-    # else:
-    #     skipped_paths.append({"path": test_file_path, "error": "Not found"})
+    success_delete_data = 0
+    for path_to_delete in paths_to_delete:
+        if os.path.exists(path_to_delete):
+            try:
+                shutil.rmtree(path_to_delete)
+                success_delete_data += 1
+                print(f"Deleted directory: {path_to_delete}")
+            except Exception as e:
+                print(f"Failed to delete {path_to_delete}: {e}")
 
-    
-    #success_delete_data =  len(skipped_paths)==0 
-
-    success = success_deregistry and success_delete_data
-    if success:
+   
+    if success_delete_data == len(paths_to_delete):
         return {"message": f"✅Deleted '{dataset_name}'" }
     else:
         return {"message": f"{dataset_name} cannot be deleted completely, check it" }
-
-
-# @app.post("/preprocess_user_dataset/{dataset_name}")
-# def preprocess_user_dataset(dataset_name: str):
-
-#     print(f"has enter preprocess_user_dataset, everything should start from her. {dataset_name}")
-#     dataset_dir = globals.USER_RAW_DATA_DIR / dataset_name
-#     print("Current working directory when just register:", os.getcwd())
-#     print(dataset_dir)
-
-#     #dataset_dir = globals.USER_RAW_DATA_DIR / dataset_name
-
-
-#     #print(dataset_dir)
-#     if not os.path.exists(dataset_dir):
-#         raise HTTPException(404, detail=f"Dataset '{dataset_name}' not found")
-
-#     try:
-#         create_origin_data_obj(dataset_name)
-#         create_test_data_obj(dataset_name)
-#         return {
-#             "status": "success",
-#             "message": f"✅ Dataset '{dataset_name}' preprocessed successfully"
-#         }
-#     except Exception as e:
-#         raise HTTPException(500, detail=f"Preprocessing failed: {str(e)}")
-
-
 
 
 @app.post("/upload")
@@ -774,11 +647,6 @@ async def upload_and_preprocess_user_dataset(file: UploadFile = File(...)):
         dataset_name = os.path.splitext(file.filename)[0]
         dataset_folder = os.path.join(globals.RAW_DATA_DIR, dataset_name)
 
-        # Remove existing folder if it exists
-        #if os.path.exists(dataset_folder):
-        #    shutil.rmtree(dataset_folder)
-        #os.makedirs(dataset_folder, exist_ok=True)
-
         # Extract ZIP into the target directory
         with zipfile.ZipFile(temp_path, "r") as zip_ref:
             zip_ref.extractall(dataset_folder)
@@ -788,10 +656,6 @@ async def upload_and_preprocess_user_dataset(file: UploadFile = File(...)):
 
         print(f"Extracted dataset: {dataset_folder}")
 
-        # return {
-        #     "message": f"Uploaded and extracted {file.filename} successfully.",
-        #     "dataset_folder": dataset_folder
-        # }
 
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive.")
@@ -801,7 +665,7 @@ async def upload_and_preprocess_user_dataset(file: UploadFile = File(...)):
 
 
     try:
-        preprocess_data_to_obj(dataset_name=dataset_name, train_percent=100, test_percent=100)
+        create_train_data_obj(dataset_name, percent=100)
         return {
             "status": "success",
             "message": f"✅ Dataset '{dataset_name}' preprocessed successfully"
@@ -869,26 +733,21 @@ def delete_all_history():
     """
     Clears (empties) the training history JSON file.
     """
-
     history_path = globals.TRAINING_HISTORY_PATH
-    print("helllo111")
     if not os.path.exists(history_path):
         return JSONResponse(content={
             "status": "ok",
             "message": f"No training history found at {history_path}."
         })
-    print("helllo122222")
     try:
         with open(history_path, "w", encoding="utf-8") as f:
             json.dump([], f, indent=4)
-        print("helllo188888")
         return JSONResponse(content={
             "status": "success",
             "message": "🧹 Training history file cleared successfully."
         })
 
     except Exception as e:
-        print(f"⚠️ Failed to clear history file: {e}")
         return JSONResponse(
             content={
                 "status": "error",
@@ -906,21 +765,24 @@ async def stream_training(req: BaseTrainRequest):
     progress_queue = multiprocessing.Queue()
 
     req_ = req.model_dump()
-    print("øv, a train worker now")
     kind = req_.get("kind", "").lower()
     if kind == "standard":
         req_obj = StandardTrainRequest(**req_)
     else:
         req_obj = AdvTrainRequest(**req_)
 
-    train_dataset = None
     compressed_obj = app.state.compressed_data_dict.get(req_obj.data_info.get("data_id"))
     if compressed_obj:
         dataset_name = compressed_obj.summary.dataset_name
-        train_dataset = prepare_trainable_data_obj(compressed_obj.compressed_data_by_label, dataset_name = dataset_name)
+        res = prepare_trainable_data(compressed_obj.compressed_data_by_label, dataset_name = dataset_name)
     else:
-        train_dataset_file = globals.COMPRESSION_CONTAINER_DIR / f"{req_obj.data_info.get('data_id')}_compressed_data.pt"
-        train_dataset = torch.load(train_dataset_file, weights_only=False)
+        data_path = globals.COMPRESSION_CONTAINER_DIR / f"{req_obj.data_info.get('data_id')}_compressed_data.pt"
+        res = torch.load(data_path, weights_only=False)
+
+
+    train_dataset = TensorDataset(res["train_x"], res["train_y"])
+    #train_loader = DataLoader(data_obj, batch_size=64, shuffle=True)
+
 
     async def event_stream():
         # Start training after SSE is ready
@@ -979,32 +841,28 @@ async def track_training_completion(train_id: str):
     app.state.training_jobs.pop(train_id, None)
 
 
-# ------------------ Maintain saved models ------------------
 
-# @app.post("/save_model/{trainId}/{epoch}")
-# def save_model(trainId: str, epoch: int):
-#     folder_dir = globals.TMP_TRAIN_CHECKPOINT_DIR
-#     if not folder_dir.exists():
-#         raise HTTPException(status_code=500, detail=f"Temporary checkpoint directory {folder_dir} does not exist")
+@app.delete("/delete_checkpoints/{trainId}")
+def delete_checkpoints(trainId: str):
+    folder_dir = globals.TMP_TRAIN_CHECKPOINT_DIR
+    if not folder_dir.exists():
+        return JSONResponse(content={"status": "ok", "message": "No checkpoint folder found."})
 
-#     checkpoint_path = folder_dir / f"{trainId}_epoch_{epoch}.pt"
-#     if not checkpoint_path.exists():
-#         raise HTTPException(status_code=404, detail=f"Checkpoint for trainId '{trainId}' epoch '{epoch}' not found")
+    deleted_files = 0
+    # Delete all matching checkpoint files (trainId_epoch_*.pt)
+    for file in folder_dir.glob(f"{trainId}_epoch_*.pt"):
+        try:
+            file.unlink()
+            deleted_files += 1
+        except Exception as e:
+            print(f"⚠️ Could not delete {file}: {e}")
 
-#     save_path = globals.PERMANENT_TRAIN_MODELS_DIR
-#     save_path.mkdir(parents=True, exist_ok=True)
+    return JSONResponse(content={
+        "status": "success",
+        "message": f"🧹 Deleted {deleted_files} checkpoint files for {trainId}."
+    })
 
-#     # Create a destination file name
-#     dest_path = save_path / f"{trainId}.pt"
-
-#     # Copy the checkpoint file (instead of loading it)
-#     shutil.copy2(checkpoint_path, dest_path)
-
-#     return JSONResponse(content={
-#         "status": "success",
-#         "message": f"✅Model saved."
-#     })
-
+# --- maintain trained model ---
 
 @app.post("/save_model/{trainId}/{epoch}")
 def save_model(trainId: str, epoch: int, info: SavedModelInfo):
@@ -1031,49 +889,19 @@ def save_model(trainId: str, epoch: int, info: SavedModelInfo):
 
 
     # Delete ALL temporary checkpoints for this trainId ----
-    #deleted_files = []
     for f in folder_dir.glob(f"{trainId}_epoch_*.pt"):
         try:
             f.unlink()
         except Exception as e:
-            print(f"⚠️ Failed to delete {f}: {e}")
+            print(f"⚠️Failed to delete {f}: {e}")
 
-    print(f"🧹 Deleted checkpoints for {trainId}")
+    print(f"🧹Deleted checkpoints for {trainId}")
 
     return JSONResponse(content={
         "status": "success",
         "message": "✅Model saved."
     })
 
-
-@app.delete("/delete_checkpoints/{trainId}")
-def delete_checkpoints(trainId: str):
-    folder_dir = globals.TMP_TRAIN_CHECKPOINT_DIR
-    if not folder_dir.exists():
-        return JSONResponse(content={"status": "ok", "message": "No checkpoint folder found."})
-
-    deleted_files = 0
-    # Delete all matching checkpoint files (trainId_epoch_*.pt)
-    for file in folder_dir.glob(f"{trainId}_epoch_*.pt"):
-        try:
-            file.unlink()
-            deleted_files += 1
-        except Exception as e:
-            print(f"⚠️ Could not delete {file}: {e}")
-
-    # Also delete any subdirectory named after the trainId
-    # train_dir = folder_dir / trainId
-    # if train_dir.exists() and train_dir.is_dir():
-    #     try:
-    #         shutil.rmtree(train_dir)
-    #         print(f"🧹 Deleted directory {train_dir}")
-    #     except Exception as e:
-    #         print(f"⚠️ Could not delete directory {train_dir}: {e}")
-
-    return JSONResponse(content={
-        "status": "success",
-        "message": f"🧹 Deleted {deleted_files} checkpoint files for {trainId}."
-    })
 
 
 @app.get("/get_models_info", response_model=list[SavedModelInfo])
@@ -1159,19 +987,20 @@ def delete_all_models():
         "message": f"🧹 Deleted all model files."
     })
 
-# ------------------ Evaluation  ------------------
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from torch.utils.data import DataLoader
-import torch
-import torch.nn as nn
-from pathlib import Path
+
+
+@app.get("/download_model/{model_id}")
+def download_model(model_id: str, display_name: str | None = Query(default=None)):
+    file_path = globals.PERMANENT_TRAIN_MODELS_DIR / f"{model_id}.pt"
+    if not file_path.exists():
+        return {"error": f"Model {model_id} not found."}
+
+    # sanitize fallback
+    filename = display_name if display_name else f"{model_id}.pt"
+    return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
 
 
 
-
-
-# --- main endpoint ---
 @app.post("/evaluate_model")
 def evaluate_model(req: EvaluationRequest):
     """
@@ -1183,184 +1012,13 @@ def evaluate_model(req: EvaluationRequest):
         raise HTTPException(status_code=404, detail=f"Model not found: {model_path}")
 
     try:
-        # 1️⃣ Load dataset
-        dataset = load_dataset(req.dataset_name, train_=req.train_)
-        loader = DataLoader(dataset, batch_size=64, shuffle=False)
-
-        # 2️⃣ Create model & load weights
-        sample, _ = dataset[0]
-        in_channels = sample.shape[0]
-        num_classes = len(load_dataset_classes()[req.dataset_name])
-
-        model = ConvNet(in_channels=in_channels, num_classes=num_classes)
-
-        model.load_state_dict(torch.load(model_path, map_location="cpu"))
-        model.eval()
-
-        # 3️⃣ Evaluate
-        criterion = nn.CrossEntropyLoss()
-        total_loss, correct, total = 0.0, 0, 0
-
-        with torch.no_grad():
-            for x, y in loader:
-                outputs = model(x)
-                loss = criterion(outputs, y)
-                total_loss += loss.item() * x.size(0)
-                preds = torch.argmax(outputs, dim=1)
-                correct += (preds == y).sum().item()
-                total += y.size(0)
-
-        avg_loss = total_loss / total
-        acc = correct / total
-
-        print(f"[Evaluation] {req.dataset_name} | Acc: {acc:.4f}, Loss: {avg_loss:.4f}")
-
-        return {
-            #"status": "success",
-            #"dataset": req.dataset_name,
-            #"split": req.train_,
-            #"model_path": str(model_path),
-            "accuracy": acc,
-            #"avg_loss": avg_loss
-        }
+        acc = evaluate(req, model_path)
+        return {"accuracy": acc}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Evaluation failed: {e}")
 
 
-
-
-
-
-
-# # ------------------ Safe main entry ------------------
-# if __name__ == "__main__":
-
-#     # Empty the file at startup 
-#     G_path = globals.TMP_DATA_FOR_GRAPH_DIR
-#     T_path = globals.TMP_TRAIN_CHECKPOINT_DIR
-#     for file in G_path.iterdir():
-#         if file.is_file():
-#             file.unlink()  # removes the file
-#     for file in T_path.iterdir():
-#         if file.is_file():
-#             file.unlink()  # removes the file
-            
-#     print(f"✅Cleared all files in {G_path}")
-#     print(f"✅Cleared all files in {T_path}")
-
-    
-#     import atexit
-
-#     # --- Limit PyTorch CPU threads for safe multi-processing ---
-#     os.environ["MKL_NUM_THREADS"] = "1"
-#     os.environ["OMP_NUM_THREADS"] = "1"
-
-#     def cleanup():
-#         print("🧹 Cleaning up worker processes...")
-#         if hasattr(app.state, "jobs"):
-#             for jobid, job in list(app.state.jobs.items()):
-#                 proc = job.get("process")
-#                 if proc and proc.is_alive():
-#                     print(f"  Terminating job {jobid} (pid={proc.pid})")
-#                     proc.terminate()
-#                     proc.join(timeout=2)
-
-#                 # close queues if possible
-#                 q = job.get("queue")
-#                 if q:
-#                     try:
-#                         q.close()
-#                     except Exception:
-#                         pass
-#                 r = job.get("results")
-#                 if r:
-#                     try:
-#                         r.close()
-#                     except Exception:
-#                         pass
-
-#             app.state.jobs.clear()
-#         print("✅Cleanup finished.")
-
-#     atexit.register(cleanup)
-
-#     import multiprocessing as mp
-#     mp.set_start_method("spawn", force=True)  # safer for torch + macOS
-
-#     # Start your server
-#     import uvicorn
-#     uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=True)
-#     #uvicorn.run("api:app", host="127.0.0.1", port=8000)
-    
-
-
-
-
-
-# # ------------------ Global setup ------------------
-
-
-# # --- Limit PyTorch CPU threads for safe multi-processing ---
-# os.environ["MKL_NUM_THREADS"] = "1"
-# os.environ["OMP_NUM_THREADS"] = "1"
-
-# # --- Set multiprocessing start method safely ---
-# try:
-#     mp.set_start_method("spawn", force=True)  # safer for torch + macOS + Docker
-# except RuntimeError:
-#     # already set by another module
-#     pass
-
-
-# # ------------------ Lifecycle events ------------------
-
-# @app.on_event("startup")
-# async def startup_event():
-#     """Runs once when the FastAPI app starts (both locally and in Docker)."""
-#     G_path = globals.TMP_DATA_FOR_GRAPH_DIR
-#     T_path = globals.TMP_TRAIN_CHECKPOINT_DIR
-
-#     # Clear temp directories
-#     for file in G_path.iterdir():
-#         if file.is_file():
-#             file.unlink()
-#     for file in T_path.iterdir():
-#         if file.is_file():
-#             file.unlink()
-
-#     print(f"✅ Cleared all files in {G_path}")
-#     print(f"✅ Cleared all files in {T_path}")
-#     print("✅ Backend startup complete.")
-
-
-# @app.on_event("shutdown")
-# async def shutdown_event():
-#     """Runs when the app or container shuts down."""
-#     print("🧹 Cleaning up worker processes...")
-
-#     # Combine your compression + training jobs cleanup
-#     for job_dict_name in ("compression_jobs", "training_jobs"):
-#         if hasattr(app.state, job_dict_name):
-#             job_dict = getattr(app.state, job_dict_name)
-#             for jobid, job in list(job_dict.items()):
-#                 proc = job.get("process")
-#                 if proc and proc.is_alive():
-#                     print(f"  Terminating job {jobid} (pid={proc.pid})")
-#                     proc.terminate()
-#                     proc.join(timeout=2)
-
-#                 for key in ("queue", "results", "cancel"):
-#                     obj = job.get(key)
-#                     if obj:
-#                         try:
-#                             obj.close()
-#                         except Exception:
-#                             pass
-
-#             job_dict.clear()
-
-#     print("✅ Cleanup finished.")
 
 
 

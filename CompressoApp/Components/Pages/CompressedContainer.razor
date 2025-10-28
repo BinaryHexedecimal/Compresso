@@ -21,6 +21,7 @@ else
                 <th>K</th>
                 <th>Timestamp</th>
                 <th> </th>
+                <th> </th>
                 <th>                
                     <button class="btn btn-danger"
                         style="width:110px"
@@ -49,6 +50,13 @@ else
                         <td>@summary.Norm</td>
                         <td>@summary.K</td>
                         <td>@summary.Timestamp.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td>
+                            <button class="action-btn primary"
+                                    style="width:110px"
+                                    @onclick="() => HandleDownload(summary.CompressionJobId)">
+                                Download
+                            </button>
+                        </td>
                         <td>
                             <button class="action-btn primary"
                                     style="width:110px"

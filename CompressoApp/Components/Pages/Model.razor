@@ -3,7 +3,6 @@
 
 @using CompressoApp.Services;
 @using CompressoApp.Models;
-@inject IJSRuntime JS
 
 <h1>Models</h1>
 @if (modelInfos == null)
@@ -17,7 +16,7 @@ else
             <tr>
                 <th>Dataset</th>
                 <th>K</th>
-                <th>Train Type</th>
+                <th style="white-space: nowrap;">Train Type</th>
                 <th>         
                     <button class="btn btn-danger"
                         style="width:120px"
@@ -25,6 +24,7 @@ else
                         Delete All
                     </button>
                 </th>
+                <th></th>
                 <th></th>
                 <th>Accuracy</th>
             </tr>
@@ -53,11 +53,20 @@ else
                                 Delete
                             </button>
                         </td>
+
+                        <td>
+                            <button class="action-btn primary"
+                                    style="width:120px"
+                                    @onclick="() => DownloadModel(modelInfo.ModelId)">
+                                Download
+                            </button>
+                        </td>
+
                         <td>
                             <td>
                                 @if (evaluatingModelId == modelInfo.ModelId)
                                 {
-                                    <button class="btn btn-secondary" disabled style="width:150px">
+                                    <button class="btn btn-secondary" disabled style="width:130px">
                                         <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                                         &nbsp;Running...
                                     </button>

@@ -10,7 +10,6 @@ WORKDIR /app
 # ======================
 # Install dependencies
 # ======================
-# Copy only requirements first (for better Docker caching)
 COPY requirements.txt .
 
 # Install dependencies
@@ -21,10 +20,6 @@ RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 # Copy your code
 # ======================
 COPY . .
-
-
-# Optional: ensure your temporary directories exist
-#RUN mkdir -p /app/tmp_compression /app/tmp_train_checkpoints
 
 # ======================
 # Environment setup

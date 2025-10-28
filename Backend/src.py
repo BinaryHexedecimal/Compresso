@@ -86,7 +86,7 @@ class MFC():
             if k:
                 m.addConstr(obj == k, name='c0')
             m.optimize()
-            #print(f"m.status is {m.status}")
+
             if m.status == 2:  # 2 optimal; 3 infeasible; 4 infeasible or unbounded; 5 unbounded; 9 time_limit; 12 numeric; 13 suboptimal; 14 inprogress; 17 mem_limit.
                 return s.X, m.Runtime
             else:

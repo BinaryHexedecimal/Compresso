@@ -1,60 +1,29 @@
 using CompressoApp.Models;
 using CompressoApp.Services;
 using Microsoft.AspNetCore.Components;
-
+using Microsoft.JSInterop;
 
 namespace CompressoApp.Components.Pages;
 
-public partial class CompressedContainer: ComponentBase
+public partial class CompressedContainer : ComponentBase
 {
     [Inject] private ApiClient Api { get; set; } = default!;
     [Inject] private NavigationManager NavManager { get; set; } = default!;
     //[Inject] private SummaryLoadService SummaryService { get; set; } = default!;
     [Inject] private TrainStateService TrainState { get; set; } = default!;
+    [Inject] private IServiceProvider Services { get; set; } = default!;
+    private string backendUrl = string.Empty;
+    private BackendUrls? backendUrls;
 
     private List<CompressionSummary>? summaries;
 
     protected override async Task OnInitializedAsync()
     {
         summaries = await Api.LoadAllSummariesFromContainerAsync();
+        backendUrls = Services.GetRequiredService<BackendUrls>();
+        backendUrl = backendUrls.External;
     }
 
-
-    // private async Task<bool> LoadSummariesAsync()
-    // {
-    //     // Load all summaries from container
-    //     var latest = await SummaryService.LoadAllSummariesFromContainerAsync();
-
-    //     // Sort descending by Timestamp
-    //     latest = latest.OrderByDescending(s => s.Timestamp).ToList();
-
-    //     // Compare with existing list
-    //     if (summaries == null || !latest.SequenceEqual(summaries, new SummaryComparer()))
-    //     {
-    //         summaries = latest;
-    //         return true;
-    //     }
-
-    //     return false;
-    // }
-
-
-    // public class SummaryComparer : IEqualityComparer<CompressionSummary>
-    // {
-    //     public bool Equals(CompressionSummary? x, CompressionSummary? y)
-    //     {
-    //         if (x == null && y == null) return true;
-    //         if (x == null || y == null) return false;
-
-    //         // Compare by JobId (or Timestamp, or both)
-    //         return x.CompressionJobId == y.CompressionJobId;
-    //     }
-
-    //     public int GetHashCode(CompressionSummary obj)
-    //     {
-    //         return HashCode.Combine(obj.CompressionJobId);
-    //     }
-    // }
 
 
     private async Task HandleTrain(string jobId)
@@ -86,13 +55,21 @@ public partial class CompressedContainer: ComponentBase
         if (!confirm)
             return;
         var result = await Api.DeleteAllContainerDataAsync();
-        // Refresh after deletion
 
-        //modelInfos = await Api.GetSavedModelInfoAsync();
         summaries = await Api.LoadAllSummariesFromContainerAsync();
         await InvokeAsync(StateHasChanged);
 
         Console.WriteLine(result);
     }
 
+
+    private async Task HandleDownload(string compressionJobId)
+    {
+        var sm = summaries!.First(s => string.Equals(s.CompressionJobId, compressionJobId, StringComparison.OrdinalIgnoreCase));
+        var desired = $"compressed_data_{sm.DatasetName}_{sm.Norm}_K_{sm.K}.pt";
+
+        var apiUrl = $"{backendUrls!.External}/download_compressed_data/{compressionJobId}?display_name={Uri.EscapeDataString(desired)}";
+
+        await JS.InvokeVoidAsync("downloadFileFromUrl", apiUrl, desired);
+    }
 }

@@ -1,8 +1,3 @@
-#from torch.serialization import safe_globals
-#from multiprocessing import Process, Queue, Event
-#from tqdm import tqdm
-#import gurobipy as gp
-
 from torchvision import datasets, transforms
 import torch
 import random
@@ -10,7 +5,7 @@ from torch.utils.data import TensorDataset, Subset
 import json
 import os, glob
 from PIL import Image
-import shutil
+
 
 
 from models import OriginDatasetPerLabel
@@ -21,8 +16,6 @@ from src import MFC
 # ------------------register dataset labels ------------------ #
 def load_dataset_classes():
     if os.path.exists(globals.REGISTRY_LABELS_PATH):
-        #print("Current working directory when just register:", os.getcwd())
-        #print(globals.REGISTRY_LABELS_PATH)
         with open(globals.REGISTRY_LABELS_PATH, "r") as f:
             return json.load(f)
     else:
@@ -30,8 +23,6 @@ def load_dataset_classes():
 
 def save_dataset_classes(dataset_classes: dict):
     with open(globals.REGISTRY_LABELS_PATH, "w") as f:
-        #print("Current working directory when just register:", os.getcwd())
-        #print(globals.REGISTRY_LABELS_PATH)
         json.dump(dataset_classes, f, indent=4)
     print(f"Saved dataset registry to {globals.REGISTRY_LABELS_PATH}")
 
@@ -47,22 +38,17 @@ def register_dataset_classes(dataset_name: str, class_names: list):
 # ------------------register active dataset ------------------ #
 def load_dataset_names():
     if os.path.exists(globals.REGISTRY_ACTIVE_DATASETS_PATH):
-        #print("Current working directory when just read, acitve:", os.getcwd())
-        #print(globals.REGISTRY_ACTIVE_DATASETS_PATH)
         with open(globals.REGISTRY_ACTIVE_DATASETS_PATH, "r") as f:
             return json.load(f)
     else:
         return {}
 
 def save_dataset_names(active_datasets: list):
-    #print("Current working directory when just register, acitve:", os.getcwd())
-    #print(globals.REGISTRY_ACTIVE_DATASETS_PATH)
     with open(globals.REGISTRY_ACTIVE_DATASETS_PATH, "w") as f:
         json.dump(active_datasets, f, indent=4)
     print(f"Saved dataset registry to {globals.REGISTRY_ACTIVE_DATASETS_PATH}")
 
 def register_dataset_names(dataset_name: str):
-    print("begin to register")
     data = load_dataset_names()
     if dataset_name in data: # and data[dataset_name] == class_names:
         print(f"Dataset '{dataset_name}' already registered, skipping.")
@@ -129,12 +115,9 @@ def load_user_dataset(dataset_name: str, train_: bool = True):
         transforms.Resize(resize_to),
         transforms.ToTensor(),
     ])
-    print(f"Auto-configured transform → mode: {mode}, resize: {resize_to}, normalize mean={mean}")
 
     dataset = datasets.ImageFolder(root=base_dir, transform=transform)
 
-    print(f"Loaded user dataset from '{base_dir}' — {len(dataset)} samples, classes: {dataset.classes}")
-    
     if train_:
         register_dataset_classes(dataset_name, dataset.classes)
         register_dataset_names(dataset_name)
@@ -145,8 +128,18 @@ def load_user_dataset(dataset_name: str, train_: bool = True):
 
 
 # ------------------ load data ------------------
+
+
+def prepare_train_data(dataset_name:str, percent: int):
+    dataset = load_dataset(dataset_name, train_ = True)
+    create_train_data_obj(dataset_name, percent)
+
+
+def prepare_test_data(dataset_name:str):
+    dataset = load_dataset(dataset_name, train_ = False)
+
+
 def load_dataset(dataset_name: str, train_: bool = True):
-    print(f"try to load new dataset {dataset_name}")
     dataset_name = dataset_name.lower()
 
     TRANSFORM = transforms.ToTensor()
@@ -173,9 +166,7 @@ def load_dataset(dataset_name: str, train_: bool = True):
         split = "train" if train_ else "test"
         return datasets.SVHN(root=globals.RAW_DATA_DIR  / "SVHN", split=split, download=True, transform=TRANSFORM)
     else:
-        print(f"try to load new dataset {dataset_name}, before")
         _dataset = load_user_dataset(dataset_name, train_=train_)
-        print(f"try to load new dataset {dataset_name}, after")
         return _dataset
 
 
@@ -183,19 +174,26 @@ def load_dataset(dataset_name: str, train_: bool = True):
 # ------------------------prepare data, sorted by label----------------------#
 
 def create_train_data_obj(dataset_name: str, percent: int) :
-
-    print("now inside create_origian_data_obj")
-
     """
     Unified version: handles built-in and user datasets.
     """
     dataset_name = dataset_name.lower()
     out_dir = globals.DATA_PER_LABEL_DIR
 
-    save_path = out_dir / f"{dataset_name}"
-    if os.path.exists(save_path):
-        print(f"Origin data object already exists at {save_path}")
+    #save_path = out_dir / f"{dataset_name}_percent_{percent}"
+
+
+    if dataset_name in globals.BUILT_IN_DATASET_NAMES:
+        save_path = out_dir/f"{dataset_name}_percent_{globals.BUILT_IN_DATASET_PERCENT}"
     else:
+        save_path = out_dir/f"{dataset_name}_percent_{globals.USER_DATASET_PERCENT}"
+
+
+
+    if os.path.exists(save_path):
+        print(f"Origin data object per label already exists at {save_path}")
+    else:
+
         os.makedirs(save_path, exist_ok=True)
         print(f"Processing dataset: {dataset_name} ({percent}% of data)")
 
@@ -219,75 +217,73 @@ def create_train_data_obj(dataset_name: str, percent: int) :
             take_count = max(1, int(orig_count * percent / 100))
             selected_imgs = imgs[:take_count]
             stacked_tensor = torch.stack(selected_imgs)  # shape: (N_class, C, H, W)
-            print(f"  Label '{classes[idx]}' (index {idx}): original={orig_count}, kept={take_count}")
 
             # --- Compute adjacency matrices ---
-            A_norm_dict = {}
-            for norm in ["L1", "L2", "MAX"]:
-                norm_float = globals.NORM_MAP[norm]
-                mfc = MFC(stacked_tensor, norm=norm_float)
-                A = mfc.distanceMatrix()
-                A_norm_dict[norm] = A
+            # A_norm_dict = {}
+            # for norm in ["L1", "L2", "MAX"]:
+            #     norm_float = globals.NORM_MAP[norm]
+            #     mfc = MFC(stacked_tensor, norm=norm_float)
+            #     A = mfc.distanceMatrix()
+            #     A_norm_dict[norm] = A
 
             # --- Package into OriginDatasetObj ---
             data_obj = OriginDatasetPerLabel(
                 dataset_name=dataset_name,
                 stacked_tensor=stacked_tensor,
-                adjMatrix_dict=A_norm_dict,
+                #adjMatrix_dict=A_norm_dict,
                 label=classes[idx]  # still store the readable names
             )
 
             # --- Save object ---
             torch.save(data_obj, save_path / f"{classes[idx]}.pt")
-            print(f"Saved OriginDatasetObj in {save_path}")
 
 
 
 
-def create_test_data_obj(dataset_name: str, percent: int):
-    dataset_name = dataset_name.lower()
-    dir = globals.TEST_DATA_DIR
-    os.makedirs(dir, exist_ok=True)
-    path = os.path.join(dir, f"{dataset_name}_test.pt")
-    if os.path.exists(path):
-        print(f"Test data already exist.")
-    else:
-        print(f"Downloading and preparing {dataset_name} test dataset...")
-        test_dataset  = load_dataset(dataset_name, train_=False)
+# def create_test_data_obj(dataset_name: str, percent: int):
+#     dataset_name = dataset_name.lower()
+#     dir = globals.TEST_DATA_DIR
+#     os.makedirs(dir, exist_ok=True)
+#     path = os.path.join(dir, f"{dataset_name}_test.pt")
+#     if os.path.exists(path):
+#         print(f"Test data already exist.")
+#     else:
+#         print(f"Downloading and preparing {dataset_name} test dataset...")
+#         test_dataset  = load_dataset(dataset_name, train_=False)
 
-        # Convert datasets to stacked tensors
-        test_x  = torch.stack([x for x, y in test_dataset])
-        test_y  = torch.tensor([y for x, y in test_dataset])
+#         # Convert datasets to stacked tensors
+#         test_x  = torch.stack([x for x, y in test_dataset])
+#         test_y  = torch.tensor([y for x, y in test_dataset])
 
-        # Wrap into TensorDataset
-        data_obj = TensorDataset(test_x, test_y)
+#         # Wrap into TensorDataset
+#         data_obj = TensorDataset(test_x, test_y)
 
-        # Randomly sample a fraction of the dataset
-        total_len = len(data_obj)
-        sample_size = max(1, int(total_len * percent / 100))
-        indices = random.sample(range(total_len), sample_size)
-        subset_obj = Subset(data_obj, indices)
-        torch.save(subset_obj, path)
-        print(f"Saved preprocessed test dataset to {path}")
+#         # Randomly sample a fraction of the dataset
+#         total_len = len(data_obj)
+#         sample_size = max(1, int(total_len * percent / 100))
+#         indices = random.sample(range(total_len), sample_size)
+#         subset_obj = Subset(data_obj, indices)
+#         torch.save(subset_obj, path)
 
-
-def preprocess_data_to_obj(dataset_name: str, train_percent: int = 100, test_percent:int = 100):
-    create_train_data_obj(dataset_name=dataset_name, percent=train_percent)
-    create_test_data_obj(dataset_name=dataset_name, percent=test_percent)
+# def preprocess_data_to_obj(dataset_name: str, train_percent: int = 100, test_percent:int = 100):
+#     create_train_data_obj(dataset_name=dataset_name, percent=train_percent)
+#     #create_test_data_obj(dataset_name=dataset_name, percent=test_percent)
     
-    # folder = globals.RAW_DATA_DIR / dataset_name
-
-    # if folder.exists() and folder.is_dir():
-    #     shutil.rmtree(folder)   # Recursively delete the folder and all its contents
-    #     print(f"Deleted dataset folder: {folder}")
-    # else:
-    #     print(f"Folder does not exist: {folder}, skip cleaning")
-
-
 
 # ------------------------prepare the data into trainable format----------------------#
 
-def prepare_trainable_data_obj(compressed_dict: dict, dataset_name: str):
+# The saved data_obj is a torch.utils.data.TensorDataset.
+# It holds two tensors: train_x (features) and train_y (labels).
+# It can be use as:
+# saved = torch.load("xxxxxxxx.pt")
+# data_obj = TensorDataset(saved["train_x"], saved["train_y"])
+# train_loader = DataLoader(data_obj, batch_size=64, shuffle=True)
+
+
+def save_trainable_data_in_container(
+    compressed_dict: dict,
+    compression_job_id: str,
+    dataset_name: str):
     all_x = []
     all_y = []
 
@@ -301,17 +297,38 @@ def prepare_trainable_data_obj(compressed_dict: dict, dataset_name: str):
     train_x = torch.cat(all_x, dim=0)
     train_y = torch.cat(all_y, dim=0)
 
-    # Wrap into TensorDataset
-    data_obj = TensorDataset(train_x, train_y)
-
-    return data_obj
+    # Create TensorDataset
+    #data_obj = TensorDataset(train_x, train_y)
 
 
+    save_path = globals.COMPRESSION_CONTAINER_DIR / f"{compression_job_id}_compressed_data.pt"
+    torch.save({
+        "train_x": train_x,
+        "train_y": train_y,
+        "dataset_name": dataset_name
+    }, save_path)
 
 
 
-# if __name__ == "__main__":
-#     register_dataset_classes("mnist", [str(i) for i in range(10)])
-#     register_dataset_classes("svhn", [str(i) for i in range(10)])
-#     register_dataset_classes("cifar10", datasets.CIFAR10(root=globals.TMP_RAW_DATA_DIR  / "CIFAR10", train=True, download=True).classes)
-#     register_dataset_classes("cifar100", datasets.CIFAR100(root=globals.TMP_RAW_DATA_DIR  / "CIFAR100", train=True, download=True).classes)
+def prepare_trainable_data(compressed_dict: dict, dataset_name: str):
+    all_x = []
+    all_y = []
+
+    class_names = load_dataset_classes()[dataset_name]
+    label_to_index = {label: idx for idx, label in enumerate(class_names)}
+
+    for label_str, subset in compressed_dict.items():
+        all_x.append(subset)
+        all_y.append(torch.full((subset.shape[0],), label_to_index[label_str], dtype=torch.long))
+
+    train_x = torch.cat(all_x, dim=0)
+    train_y = torch.cat(all_y, dim=0)
+
+    # Create TensorDataset
+    # data_obj = TensorDataset(train_x, train_y)
+    res = {
+        "train_x": train_x,
+        "train_y": train_y,
+        "dataset_name": dataset_name
+    }
+    return res

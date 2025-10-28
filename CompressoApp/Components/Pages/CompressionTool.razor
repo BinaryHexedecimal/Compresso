@@ -5,7 +5,6 @@
 
 @using CompressoApp.Models
 
-@inject IJSRuntime JS
 
 
 <h2 class="mb-4">Compress</h2>
@@ -16,10 +15,10 @@
         <!-- Set Parameters -->
         <div class="col-md-12 mb-3">
             <label class="form-label fw-bold">Dataset</label>
-            <DatasetSelector Value="@CompressionState.DatasetName"
-                ValueChanged="OnDatasetChanged"
-                Disabled="@(CompressionState.IsCompressing ||CompressionState.HasFinished)" 
-            />
+
+            <DatasetSelector @bind-Value="CompressionState.DatasetName"
+                 Disabled="@(CompressionState.IsCompressing || CompressionState.HasFinished)" />
+
             
         </div>
 

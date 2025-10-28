@@ -12,9 +12,6 @@ public class ApiClient
     public ApiClient(HttpClient http)
     {
         _http = http;
-        //_http.BaseAddress = new Uri("http://backend:8000");
-        //_http.BaseAddress = new Uri("http://127.0.0.1:8000");
-        //_http.BaseAddress = new Uri(backendUrl);
     }
 
 
@@ -251,7 +248,6 @@ public class ApiClient
     public async Task<string> DeleteCheckpointsAsync(string trainId)
     {
         Console.WriteLine(trainId);
-        Console.WriteLine("what is worng? not inisede??");
         var response = await _http.DeleteAsync($"/delete_checkpoints/{trainId}");
         if (!response.IsSuccessStatusCode)
             return $"Failed: {response.StatusCode}";
@@ -357,16 +353,6 @@ public class ApiClient
             return $"Failed to delete: {error}";
         }
     }
-
-
-    // public async Task<string> PreprocessUserDatasetAsync(string datasetName)
-    // {
-    //     var url = $"/preprocess_user_dataset/{datasetName}";
-    //     var response = await _http.PostAsync(url, null);
-    //     response.EnsureSuccessStatusCode();
-    //     var result = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
-    //     return result?["message"] ?? "✅Dataset preprocessed successfully.";
-    // }
 
 
     public async Task<HttpResponseMessage> PostUserDatasetAsync(MultipartFormDataContent content)

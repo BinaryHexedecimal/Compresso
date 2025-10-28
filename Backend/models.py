@@ -8,7 +8,7 @@ class OriginDatasetPerLabel(BaseModel):
     dataset_name: str   
     label: str
     stacked_tensor: torch.Tensor
-    adjMatrix_dict: dict
+    #adjMatrix_dict: dict
     model_config = {
         "arbitrary_types_allowed": True
     }
@@ -21,12 +21,11 @@ class CompressionSummary(BaseModel):
     norm: str
     k: int
     elapsed_seconds: int
-    labels: list #?
+    labels: list 
 
 class CompressedDatasetObj(BaseModel):
     compression_id: str
     compressed_data_by_label: dict
-    # nodes_by_label:dict
     summary: CompressionSummary
     offsets_by_label: dict # for visualisation
 

@@ -7,13 +7,10 @@ import time
 import json
 import multiprocessing
 
-#import Process, Queue, Event
-#from multiprocessing import Process, Queue, Event
-#import random
-#from torchvision import datasets, transforms
 
 import globals
 from src import TR   
+from util_data import load_dataset
 from util_data import load_dataset_classes
 
 
@@ -58,8 +55,9 @@ def train_worker(
                     eps_l2=1.5,
                 ):
 
-    test_dataset_file = globals.TEST_DATA_DIR / f"{req_obj.data_info.get('dataset_name')}_test.pt"
-    test_dataset = torch.load(test_dataset_file, weights_only=False)
+    #test_dataset_file = globals.TEST_DATA_DIR / f"{req_obj.data_info.get('dataset_name')}_test.pt"
+    #test_dataset = torch.load(test_dataset_file, weights_only=False)
+    test_dataset = load_dataset(req_obj.data_info.get('dataset_name'), train_ = False)
 
     all_epochs = []
     final_result_for_save = {"status": "started", 
@@ -78,7 +76,7 @@ def train_worker(
         sample, _ = train_dataset[0]
         _in_channels = sample.shape[0] 
         _num_classes = len(load_dataset_classes()[req_obj.data_info["dataset_name"]])
-        print(f"inside training, channael is {_in_channels} , num of class is {_num_classes}")
+        #print(f"inside training, channael is {_in_channels} , num of class is {_num_classes}")
         model = ConvNet(in_channels=_in_channels, num_classes=_num_classes)
         trainer = TR(model, train_loader, test_loader, eps_linf=eps_linf, eps_l2=eps_l2)
         
@@ -153,7 +151,6 @@ def train_worker(
 
 
         if os.path.exists(globals.TRAINING_HISTORY_PATH):
-            print("yes, sve a history")
             with open(globals.TRAINING_HISTORY_PATH, "r") as f:
                 try:
                     data = json.load(f)
@@ -187,3 +184,37 @@ def train_worker(
         except:
             pass
 
+
+def evaluate(req, model_path):
+    # 1️⃣ Load dataset
+    dataset = load_dataset(req.dataset_name, train_=req.train_)
+    loader = DataLoader(dataset, batch_size=64, shuffle=False)
+
+    # 2️⃣ Create model & load weights
+    sample, _ = dataset[0]
+    in_channels = sample.shape[0]
+    num_classes = len(load_dataset_classes()[req.dataset_name])
+
+    model = ConvNet(in_channels=in_channels, num_classes=num_classes)
+
+    model.load_state_dict(torch.load(model_path, map_location="cpu"))
+    model.eval()
+
+    # 3️⃣ Evaluate
+    criterion = nn.CrossEntropyLoss()
+    total_loss, correct, total = 0.0, 0, 0
+
+    with torch.no_grad():
+        for x, y in loader:
+            outputs = model(x)
+            loss = criterion(outputs, y)
+            total_loss += loss.item() * x.size(0)
+            preds = torch.argmax(outputs, dim=1)
+            correct += (preds == y).sum().item()
+            total += y.size(0)
+
+    avg_loss = total_loss / total
+    acc = correct / total
+
+    print(f"[Evaluation] {req.dataset_name} | Acc: {acc:.4f}, Loss: {avg_loss:.4f}")
+    return acc
