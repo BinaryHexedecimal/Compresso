@@ -26,7 +26,7 @@ public partial class CompressedContainer : ComponentBase
 
 
 
-    private async Task HandleTrain(string jobId)
+    private void HandleTrain()
     {
         // Optional: Show a status message or refresh summaries
         Nav($"/Train");

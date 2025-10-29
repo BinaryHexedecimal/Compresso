@@ -12,7 +12,6 @@ pydantic==2.11.7
 PySCIPOpt==5.6.0
 scipy==1.16.1
 tqdm==4.67.1
-uvicorn==0.35.0
 python-multipart==0.0.20
-
+uvicorn==0.35.0 
 

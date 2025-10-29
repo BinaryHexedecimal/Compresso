@@ -2,17 +2,11 @@ import torch
 from torch.utils.data import DataLoader
 import torch.nn as nn
 import torch.nn.functional as F
-import os, datetime
-import time
-import json
-import multiprocessing
-
 
 import globals
-from src import TR   
 from util_data import load_dataset
 from util_data import load_dataset_classes
-
+from src import MFC, TR
 
 
 # -----------------------------
@@ -47,8 +41,16 @@ class ConvNet(nn.Module):
 def evaluate(req, model_path):
     # 1️⃣ Load dataset
     dataset = load_dataset(req.dataset_name, train_=req.train_)
-    loader = DataLoader(dataset, batch_size=64, shuffle=False)
-
+    #loader = DataLoader(dataset, batch_size=64, shuffle=False)
+    loader = DataLoader(
+                        dataset,
+                        batch_size=64,
+                        shuffle=True,
+                        num_workers=min(8, globals.NUM_CPU // 2),
+                        pin_memory=True,
+                        persistent_workers=True,
+                        prefetch_factor=4
+                    )
     # 2️⃣ Create model & load weights
     sample, _ = dataset[0]
     in_channels = sample.shape[0]

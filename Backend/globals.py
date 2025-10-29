@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 BUILT_IN_DATASET_PERCENT = 15
 BUILT_IN_DATASET_NAMES = ["mnist", "cifar10", "cifar100", "svhn"]
@@ -11,6 +12,9 @@ EPS_L2=1.5,
 
 NUM_IMAGE_INSIDE_ETA = 7
 MAX_FILES_IN_CONTAINER = 100
+
+NUM_CPU = os.cpu_count()
+
 
 
 BASE_DIR = Path(__file__).resolve().parent  

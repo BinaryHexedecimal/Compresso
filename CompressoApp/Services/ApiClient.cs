@@ -86,7 +86,7 @@ public class ApiClient
     {
         try
         {
-            var url = $"/get_graph_json_data/{compressionJobId}/{label}/{k}";
+            var url = $"/get_graph_json/{compressionJobId}/{label}/{k}";
             var response = await _http.PostAsync(url, null);
             response.EnsureSuccessStatusCode(); // throws if not 2xx
             return response;
@@ -175,15 +175,15 @@ public class ApiClient
             ?? new List<CompressionSummary>();
     }
 
-    public async Task<CompressionSummary> LoadSummaryFromContainerAsync(string compression_job_id)
-    {
-        var response = await _http.GetFromJsonAsync<CompressionSummary>(
-            $"/summary_from_container/{compression_job_id}");
+    // public async Task<CompressionSummary> LoadSummaryFromContainerAsync(string compression_job_id)
+    // {
+    //     var response = await _http.GetFromJsonAsync<CompressionSummary>(
+    //         $"/summary_from_container/{compression_job_id}");
 
-        if (response == null)
-            throw new InvalidOperationException($"Summary not found for {compression_job_id}");
-        return response;
-    }
+    //     if (response == null)
+    //         throw new InvalidOperationException($"Summary not found for {compression_job_id}");
+    //     return response;
+    // }
 
 
 

@@ -11,9 +11,7 @@ services:
 
     volumes:
       - ./Backend/data:/app/data
-      # optional: share your Gurobi license (local file)
-      # - ~/.gurobi_docker.lic:/root/gurobi.lic
-      
+
     ports:
       - "8000:8000"
     healthcheck:
@@ -33,10 +31,4 @@ services:
       backend:
         condition: service_healthy
     environment:
-      # - ASPNETCORE_URLS=http://+:3000
-
-      # - BACKEND_URL=http://backend:8000
-
       - ASPNETCORE_URLS=http://+:3000
-      # - BACKEND_URL_INTERNAL=http://backend:8000
-      # - BACKEND_URL_EXTERNAL=http://localhost:8000

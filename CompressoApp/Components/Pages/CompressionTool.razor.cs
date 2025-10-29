@@ -260,7 +260,7 @@ public partial class CompressionTool : ComponentBase, IDisposable
                 await InvokeAsync(StateHasChanged);
                 try
                 {
-                    CompressionSummary = await Api.GetCompressionSummaryFromMemoryAsync(CompressionId);
+                    CompressionSummary = await Api.GetCompressionSummaryFromMemoryAsync(CompressionId!);
                 }
                 catch (Exception ex)
                 {

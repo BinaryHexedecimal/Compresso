@@ -1,9 +1,8 @@
 from fastapi import FastAPI, HTTPException, status, UploadFile, File, Query
-from fastapi.responses import StreamingResponse, Response, JSONResponse, FileResponse  #HTMLResponse
+from fastapi.responses import StreamingResponse, Response, JSONResponse, FileResponse 
 import plotly.io as pio
 from fastapi.middleware.cors import CORSMiddleware
 import json
-import multiprocessing as mp
 from contextlib import asynccontextmanager
 import asyncio
 import pickle
@@ -22,26 +21,12 @@ from models import *
 from util_train import *
 from util_compression import *
 from util_data import *
-from util_image import get_images, draw_graph, transform_images_for_frontend, tensor_to_image_bytes
+from util_image import *
 from util_train import *
 
 
 
 # ------------------ Global setup ------------------
-
-# Limit PyTorch CPU threads for safe multi-processing
-#os.environ["MKL_NUM_THREADS"] = "1"
-#os.environ["OMP_NUM_THREADS"] = "1"
-
-# Set multiprocessing start method safely
-# try:
-#     mp.set_start_method("spawn", force=True)  # safer for torch + macOS + Docker
-# except RuntimeError:
-#     # already set by another module
-#     pass
-
-
-
 
 # Track cancel flags and active jobs
 ACTIVE_JOBS = {
@@ -49,10 +34,15 @@ ACTIVE_JOBS = {
     "training": {}
 }
 
-#active_compression_summary = None
 active_compressed_data_obj = None
 
 
+
+# Device and model setup (once) 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Global PyTorch thread configuration
+torch.set_num_threads(globals.NUM_CPU // 2)  #floor division, For CPU-heavy ops
+#torch.set_num_interop_threads(2) # For cross-op scheduling
 
 # ------------------ Unified lifespan ------------------
 
@@ -63,7 +53,7 @@ async def lifespan(app: FastAPI):
     # --- Startup phase ---
     print("Starting backend initialization...")
 
-    # ✅ Ensure all required directories exist (add this block)
+    # Ensure all required directories exist
     for d in [
         globals.RAW_DATA_DIR,
         globals.COMPRESSION_CONTAINER_DIR,
@@ -71,22 +61,20 @@ async def lifespan(app: FastAPI):
         globals.PERMANENT_TRAIN_MODELS_DIR,
         globals.ADJ_MATRIX_DIR,
         globals.TMP_DATA_FOR_GRAPH_DIR,
-        #globals.TMP_DATA_OF_COMPRESSION_DIR,
         globals.TMP_TRAIN_CHECKPOINT_DIR,
     ]:
         d.mkdir(parents=True, exist_ok=True)
-        # Optional: log which ones were created
         if not any(d.iterdir()):
             print(f"Created empty directory: {d}")
         else:
             print(f"Directory exists: {d}")
 
 
-    # ✅ Ensure key registry files exist
+    # Ensure key registry files exist
     registry_files = {
-        globals.REGISTRY_LABELS_PATH: {},           # dataset_classes.json → empty dict
-        globals.REGISTRY_ACTIVE_DATASETS_PATH: [],  # active_datasets.json → empty list
-        globals.TRAINING_HISTORY_PATH: [],          # train_history.json → empty list
+        globals.REGISTRY_LABELS_PATH: {},           # empty dict
+        globals.REGISTRY_ACTIVE_DATASETS_PATH: [],  # empty list
+        globals.TRAINING_HISTORY_PATH: [],          # empty list
     }
 
     for path, default_content in registry_files.items():
@@ -96,18 +84,11 @@ async def lifespan(app: FastAPI):
                     json.dump(default_content, f, indent=2)
                 print(f"Created {path.name} with default content.")
             except Exception as e:
-                print(f"⚠️ Could not create {path.name}: {e}")
+                print(f"Could not create {path.name}: {e}")
         else:
             print(f"{path.name} already exists, skipping.")
 
 
-
-    #active_compressed_data_obj=None
-
-
-    # app.state.compression_jobs = {}
-    # app.state.training_jobs = {}
-    # app.state.compressed_data_dict = {}
 
     # Clean temp dirs
     for path in [globals.TMP_DATA_FOR_GRAPH_DIR, 
@@ -120,8 +101,6 @@ async def lifespan(app: FastAPI):
 
     # Preload standard datasets
     for id in globals.BUILT_IN_DATASET_NAMES:
-        #preprocess_data_to_obj(id, train_percent=10, test_percent=20)
-        #preprocess_data_to_obj(id, train_percent=10, test_percent=10)
         prepare_train_data(id, percent=globals.BUILT_IN_DATASET_PERCENT)
         prepare_test_data(id)
         
@@ -134,29 +113,8 @@ async def lifespan(app: FastAPI):
 
     # --- Shutdown phase ---
     print("Cleaning up worker processes...")
-
-    # for job_dict_name in ("compression_jobs", "training_jobs"):
-    #     if hasattr(app.state, job_dict_name):
-    #         job_dict = getattr(app.state, job_dict_name)
-    #         for jobid, job in list(job_dict.items()):
-    #             proc = job.get("process")
-    #             if proc and proc.is_alive():
-    #                 print(f"  Terminating job {jobid} (pid={proc.pid})")
-    #                 proc.terminate()
-    #                 proc.join(timeout=2)
-
-    #             # Close associated queues and events
-    #             for key in ("queue", "results", "cancel"):
-    #                 obj = job.get(key)
-    #                 if obj:
-    #                     try:
-    #                         obj.close()
-    #                     except Exception:
-    #                         pass
-
-    #         job_dict.clear()
-
-    # print("Cleanup finished. Server shutdown complete.")
+    # blabla
+    print("Cleanup finished. Server shutdown complete.")
 
 
 # ------------------ FastAPI app ------------------
@@ -171,7 +129,7 @@ app.add_middleware(
 )
 
 
-# ------------------ Compression  ------------------
+# ------------------ Compression  ------------------ #
 
 @app.post("/compress")
 async def compress(req: CompressRequest):
@@ -185,12 +143,14 @@ async def compress(req: CompressRequest):
         # Notify start
         yield f"data: {json.dumps({'type': 'start'})}\n\n"
         yield f"data: {json.dumps({'total': len(labels)})}\n\n"
+        
         compressed_data_by_label = {}
         for i, label in enumerate(labels):
 
-            # Let FastAPI handle any cancel requests now
-            await asyncio.sleep(0.2)
-
+            # have a rest/pause
+            # let FastAPI handle any cancel possible requests
+            # mega vigtigt!
+            await asyncio.sleep(0.3)
 
             if ACTIVE_JOBS["compression"][job_id]["cancel"]:
                 #yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
@@ -207,7 +167,7 @@ async def compress(req: CompressRequest):
             summary = CompressionSummary(
                 compression_id=req.compression_job_id,
                 dataset_name=req.dataset_name,
-                timestamp=datetime.datetime.now(),
+                timestamp=datetime.now(),
                 norm=req.norm,
                 k=req.k,
                 elapsed_seconds=int(time.time() - start_time),
@@ -222,7 +182,6 @@ async def compress(req: CompressRequest):
                 summary=summary,
                 offsets_by_label=offsets_by_label,
             )
-
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         ACTIVE_JOBS["compression"].pop(job_id, None)
@@ -233,40 +192,222 @@ async def compress(req: CompressRequest):
 
 @app.delete("/cancel_compression/{compression_job_id}")
 def cancel_compression(compression_job_id: str):
-    print("will set job cancelled")
     job = ACTIVE_JOBS["compression"].get(compression_job_id)
     if not job:
-        raise HTTPException(404, "Job not found")
+        raise HTTPException(404, f"Job {compression_job_id} not found and failed to cancel")
     job["cancel"] = True
     return {"status": "cancel requested", "id": compression_job_id}
 
 
 
 
+# ------------------ Train  ------------------- #
+@app.post("/train")
+async def stream_training(req: BaseTrainRequest):
 
-# ------------------ Image supports  ------------------
+    ACTIVE_JOBS["training"][req.train_job_id] = {"cancel": False}
+
+    async def event_stream():
+        # Notify start
+        req_ = req.model_dump()
+        kind = req_.get("kind", "").lower()
+        if kind == "standard":
+            req_obj = StandardTrainRequest(**req_)
+        else:
+            req_obj = AdvTrainRequest(**req_)
+
+        training_data_path = globals.COMPRESSION_CONTAINER_DIR / f"{req_obj.data_info.get('data_id')}_compressed_data.pt"
+        res = torch.load(training_data_path, weights_only=False)
+        train_dataset = TensorDataset(res["train_x"], res["train_y"])
+        test_dataset = load_dataset(req_obj.data_info.get('dataset_name'), train_ = False)
+        #train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+        train_loader = DataLoader(
+                                train_dataset,
+                                batch_size=64,
+                                shuffle=True,
+                                num_workers=min(8, globals.NUM_CPU // 2),
+                                pin_memory=True,
+                                persistent_workers=True,
+                                prefetch_factor=4
+                            )
+        #test_loader  = DataLoader(test_dataset, batch_size=64, shuffle=False)
+        
+        test_loader = DataLoader(
+                                test_dataset,
+                                batch_size=64,
+                                shuffle=True,
+                                num_workers=min(8, globals.NUM_CPU // 2),
+                                pin_memory=True,
+                                persistent_workers=True,
+                                prefetch_factor=4
+                            )
+        sample, _ = train_dataset[0]
+        _in_channels = sample.shape[0] 
+        _num_classes = len(load_dataset_classes()[req_obj.data_info["dataset_name"]])
+        print(f"The training data has channael {_in_channels} and num of class {_num_classes}")
+        model = ConvNet(in_channels=_in_channels, num_classes=_num_classes)
+        trainer = TR(model, train_loader, test_loader, eps_linf=globals.EPS_LINF, eps_l2=globals.EPS_L2)
+        
+        # Select optimizer
+        if req_obj.optimizer.lower() == "sgd":
+            opt = torch.optim.SGD(model.parameters(), lr=req_obj.learning_rate, momentum=0.9, weight_decay=5e-4)
+        elif req_obj.optimizer.lower() == "adam":
+            opt = torch.optim.Adam(model.parameters(), lr=req_obj.learning_rate, weight_decay=5e-4)
+        else:
+            raise ValueError(f"Unknown optimizer: {req_obj.optimizer}")
+
+
+        all_epochs = []
+
+        yield f"data: {json.dumps({'type': 'start'})}\n\n"
+        for epoch in range(1, req_obj.num_iterations+1):
+            await asyncio.sleep(0.2)
+            if ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:
+                #yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+                break
+
+            model_save_path = globals.TMP_TRAIN_CHECKPOINT_DIR / f"{req_obj.train_job_id}_epoch_{epoch}.pt"
+            if req_obj.kind == "standard":                
+                train_acc, train_loss = trainer.epoch(train_loader, weight=False, opt=opt)
+                test_acc, test_loss = trainer.epoch(test_loader)
+
+                if (req_obj.num_iterations == epoch) and req_obj.require_adv_attack_test:   
+                    linf_adv_acc, linf_adv_loss = trainer.epoch_adv(test_loader, trainer.pgd_linf, weight=False, epsilon=trainer.eps_linf)
+                    #l2_adv_acc, l2_adv_loss = trainer.epoch_adv(test_loader, trainer.pgd_l2, weight=False, epsilon=trainer.eps_l2)
+                else:
+                    linf_adv_acc, linf_adv_loss = -1, -1
+                    #l2_adv_acc, l2_adv_loss = -1, -1
+
+                torch.save(model.state_dict(), model_save_path)
+                print(f"Saved temporary checkpoint: {model_save_path}")    
+
+            elif req_obj.kind == "adversarial":
+                attack = trainer.pgd_linf if req_obj.attack == "PGD-linf" else trainer.pgd_l2
+                train_acc, train_loss = trainer.epoch_adv(train_loader, attack=attack, weight=False, opt=opt, epsilon=req_obj.epsilon, alpha = req_obj.alpha  )
+                test_acc, test_loss = trainer.epoch(test_loader)
+
+                if (req_obj.num_iterations == epoch) and req_obj.require_adv_attack_test:  
+                    linf_adv_acc, linf_adv_loss = trainer.epoch_adv(test_loader, trainer.pgd_linf, weight=False, epsilon=trainer.eps_linf)
+
+                else:
+                    linf_adv_acc, linf_adv_loss = -1, -1
+                    #l2_adv_acc, l2_adv_loss = -1, -1
+
+                torch.save(model.state_dict(), model_save_path)
+                print(f"Saved temporary checkpoint: {model_save_path}")    
+
+            else:
+                print("Ops, no such a kind of train")
+            
+            epoch_data = {
+                "type": "epoch",
+                "epoch": epoch,
+                "train_acc": train_acc,
+                "test_acc": test_acc,
+                "linf_adv_acc": linf_adv_acc,
+            }
+
+            all_epochs.append(epoch_data)
+            yield f"data: {json.dumps(epoch_data)}\n\n"
+
+
+        run_info = {"status": "", 
+                    "train_job_id": req_obj.train_job_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "epochs": all_epochs, 
+                    "req_obj": vars(req_obj)}
+        if ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:            
+            run_info["status"]="cancelled"
+        else:
+            run_info["status"]= "done"
+           
+            
+        # save run info in train history file
+        if os.path.exists(globals.TRAINING_HISTORY_PATH):
+            with open(globals.TRAINING_HISTORY_PATH, "r") as f:
+                try:
+                    history = json.load(f)
+                except json.JSONDecodeError:
+                    history = []
+        else:
+            history = []
+        if not isinstance(history, list):
+            history = [history]
+        history.append(run_info)
+        with open(globals.TRAINING_HISTORY_PATH, "w") as f:
+            json.dump(history, f, indent=4)
+        print(f"Saved training result for job {run_info['train_job_id']}")
+
+
+
+        if ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:            
+            yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+            
+        else:
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        ACTIVE_JOBS["training"].pop(req.train_job_id, None)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+
+
+@app.delete("/cancel_train/{train_id}")
+def cancel_training(train_id: str):
+    job = ACTIVE_JOBS["training"].get(train_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Training Job {train_id} not found and fail to cancel.")
+    job["cancel"]= True   # signal to worker
+    return {"status": "cancellation requested", "id": train_id}
+
+
+
+@app.delete("/delete_checkpoints/{trainId}")
+def delete_checkpoints(trainId: str):
+    folder_dir = globals.TMP_TRAIN_CHECKPOINT_DIR
+    if not folder_dir.exists():
+        return JSONResponse(content={"status": "ok", "message": "No checkpoint folder found."})
+
+    deleted_files = 0
+    # Delete all matching checkpoint files (trainId_epoch_*.pt)
+    for file in folder_dir.glob(f"{trainId}_epoch_*.pt"):
+        try:
+            file.unlink()
+            deleted_files += 1
+        except Exception as e:
+            print(f"Could not delete {file}: {e}")
+
+    return JSONResponse(content={
+        "status": "success",
+        "message": f"Deleted {deleted_files} checkpoint files for {trainId}."
+    })
+
+
+
+
+# ------------------ Image supports  ------------------ #
 @app.get("/sample_origin_images")
 def sample_origin_images(dataset_name: str, label: str, n: int):
+
     if dataset_name in globals.BUILT_IN_DATASET_NAMES:
         path = f"{globals.DATA_PER_LABEL_DIR}/{dataset_name}_percent_{globals.BUILT_IN_DATASET_PERCENT}/{label}.pt"
     else:
         path = f"{globals.DATA_PER_LABEL_DIR}/{dataset_name}_percent_{globals.USER_DATASET_PERCENT}/{label}.pt"
-
         
     obj = torch.load(path, weights_only=False)
-    dataset_for_one_label = obj.stacked_tensor
+    dataset = obj.stacked_tensor
     
-    if dataset_for_one_label is None or dataset_for_one_label.numel() == 0:
-        raise HTTPException(404, detail="Dataset not found")
+    if dataset is None or dataset.numel() == 0:
+        raise HTTPException(404, detail=f"Dataset for {label} not found")
 
-    _, images = get_images(dataset_for_one_label, n, 0, random_mode = True)
+    _, images = get_images(dataset, n, 0, random_mode = True)
     return transform_images_for_frontend(images)
 
 
 @app.get("/sample_compressed_images")
 def sample_compressed_images(compression_job_id:str, label: str, n: int):
     if (active_compressed_data_obj.compression_id == compression_job_id):
-        #compressed_data_obj = app.state.compressed_data_dict[compression_job_id]
         dataset_by_label = active_compressed_data_obj.compressed_data_by_label
         sequential_offsets = active_compressed_data_obj.offsets_by_label
         labels = active_compressed_data_obj.summary.labels
@@ -284,8 +425,8 @@ def sample_compressed_images(compression_job_id:str, label: str, n: int):
         )
 
 
-@app.post("/get_graph_json_data/{compression_job_id}/{label}/{k}")
-def get_graph_json_data(compression_job_id: str, label: str, k: int):
+@app.post("/get_graph_json/{compression_job_id}/{label}/{k}")
+def get_graph_json(compression_job_id: str, label: str, k: int):
     read_path = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{compression_job_id}.gpickle"
     with open(read_path, "rb") as f:
         G = pickle.load(f)
@@ -297,7 +438,8 @@ def get_graph_json_data(compression_job_id: str, label: str, k: int):
 @app.get("/get_node_image/{compression_job_id}/{label}/{node_index}")
 def get_node_image(compression_job_id: str, label: str, node_index: int):
     read_path = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{compression_job_id}_nodes.pt"
-    nodes =torch.load(read_path, map_location="cpu", weights_only=False)
+    #nodes =torch.load(read_path, map_location="cpu", weights_only=False)
+    nodes =torch.load(read_path,  weights_only=False)
     image_tensor = nodes[node_index]
     img_bytes = tensor_to_image_bytes(image_tensor)
     return Response(content=img_bytes, media_type="image/png")
@@ -317,7 +459,7 @@ def delete_graphs(compressionId: str):
             print(f"Could not delete {file}: {e}")
     return JSONResponse(content={
         "status": "success",
-        "message": f"🧹Deleted {deleted_files} graph files for compressionId '{compressionId}'."
+        "message": f"Deleted {deleted_files} graph files for compressionId '{compressionId}'."
     })
 
 @app.delete("/delete_all_graph_data")
@@ -341,11 +483,11 @@ def delete_all_graph():
 
     return JSONResponse(content={
         "status": "success",
-        "message": f"🧹Deleted {deleted_files} graph files."
+        "message": f"Deleted {deleted_files} graph files."
     })
 
 
-# ------------------ Summary supports  ------------------
+# ------------------ Summary supports  ------------------ #
 
 @app.get("/fetch_compression_summary_from_memory/{compression_job_id}")
 async def fetch_compression_summary_from_memory(compression_job_id: str):
@@ -376,29 +518,29 @@ def get_all_summaries_from_container():
     return summaries
 
 
-@app.get("/summary_from_container/{compression_job_id}", response_model=CompressionSummary)
-def get_one_summary_from_container(compression_job_id: str):
-    folder = globals.COMPRESSION_CONTAINER_DIR
-    if not folder.exists() or not folder.is_dir():
-        raise HTTPException(status_code=404, detail="User container folder not found")
+# @app.get("/summary_from_container/{compression_job_id}", response_model=CompressionSummary)
+# def get_one_summary_from_container(compression_job_id: str):
+#     folder = globals.COMPRESSION_CONTAINER_DIR
+#     if not folder.exists() or not folder.is_dir():
+#         raise HTTPException(status_code=404, detail="User container folder not found")
 
-    expected_filename = f"{compression_job_id}_summary.json"
-    summary_path = folder / expected_filename
+#     expected_filename = f"{compression_job_id}_summary.json"
+#     summary_path = folder / expected_filename
 
-    if not summary_path.exists():
-        raise HTTPException(status_code=404, detail=f"Summary for dataId '{compression_job_id}' not found")
+#     if not summary_path.exists():
+#         raise HTTPException(status_code=404, detail=f"Summary for dataId '{compression_job_id}' not found")
 
-    try:
-        with open(summary_path, "r") as f:
-            data = json.load(f)
-            return CompressionSummary(**data)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load summary: {e}")
-
-
+#     try:
+#         with open(summary_path, "r") as f:
+#             data = json.load(f)
+#             return CompressionSummary(**data)
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to load summary: {e}")
 
 
-# ------------------ Maintain compressed data container and graphs ------------------
+
+
+# ------------------ Maintain compressed data container ------------------ #
 
 @app.delete("/delete_container_data/{compression_job_id}")
 def delete_container_items(compression_job_id:str):
@@ -436,23 +578,20 @@ def delete_all_container_data():
 
     try:
         deleted_files = 0
-
-        # Only delete files (no recursive delete)
         for file in folder.iterdir():
             if file.is_file():
                 try:
                     file.unlink()
                     deleted_files += 1
                 except Exception as e:
-                    print(f"⚠️Failed to delete {file}: {e}")
-
+                    print(f"Failed to delete {file}: {e}")
         return JSONResponse(content={
             "status": "success",
             "message": f"Has deleted {deleted_files} files"
         })
 
     except Exception as e:
-        print(f"❌Error clearing container data: {e}")
+        print(f"Error clearing container data: {e}")
         return JSONResponse(
             content={
                 "status": "error",
@@ -476,15 +615,12 @@ def save_in_container(compression_job_id: str):
             detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{active_compressed_data_obj.compression_id}'."
         )
     else:
-        #compressed_obj = app.state.compressed_data_dict.get(compression_job_id)
         current_summary = active_compressed_data_obj.summary
-
         dataset_name = current_summary.dataset_name
-        
         files = [f for f in os.listdir(file_dir) if f.endswith("_summary.json")]
         if len(files) >= globals.MAX_FILES_IN_CONTAINER :
             return JSONResponse(content={
-                "SaveMessage": f"⚠️Container full: {len(files)}/{globals.MAX_FILES_IN_CONTAINER} files.",
+                "SaveMessage": f"Container full: {len(files)}/{globals.MAX_FILES_IN_CONTAINER} files.",
                 "RequireUserDecision": True
             })
         for f in files:
@@ -497,7 +633,6 @@ def save_in_container(compression_job_id: str):
                 if (saved_summary.get("dataset_name") == current_summary.dataset_name and
                     saved_summary.get("k") == current_summary.k and
                     saved_summary.get("norm") == current_summary.norm):
-
                     print("Found duplicate id is " + saved_summary.get("compression_id"))
                     return JSONResponse(content={
                         "SaveMessage": (
@@ -507,7 +642,7 @@ def save_in_container(compression_job_id: str):
                         "RequireUserDecision": True,
                         "DuplicateId": saved_summary.get("compression_id")
                     })
-
+        # no exceed, no duplicate, start saving
         # Save .pt 
         save_trainable_data_in_container(
                                 active_compressed_data_obj.compressed_data_by_label, 
@@ -515,9 +650,8 @@ def save_in_container(compression_job_id: str):
                                 dataset_name = dataset_name)
 
         # Save summary
-        #torch.save(data_obj, os.path.join(file_dir, f"{compression_job_id}_compressed_data.pt"))
         with open(os.path.join(file_dir, f"{compression_job_id}_summary.json"), "w") as f:
-            f.write(active_compressed_data_obj.summary.json())
+            f.write(active_compressed_data_obj.summary.model_dump_json())
 
         return JSONResponse(content={
             "SaveMessage": "✅Saved successfully.",
@@ -538,11 +672,7 @@ def handle_replace_choice(compression_job_id: str, duplicate_id: Optional[str] =
                 "RequireUserDecision": True
             }
         )
-    # print(active_compressed_data_obj.compression_id)
-    # print(compression_job_id)
-    # print(duplicate_id)
 
-    #compressed_obj = app.state.compressed_data_dict.get(compression_job_id)
     if active_compressed_data_obj.compression_id != compression_job_id:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -553,38 +683,37 @@ def handle_replace_choice(compression_job_id: str, duplicate_id: Optional[str] =
         )
 
     try:
-        message_suffix = ""  # Will hold message text about what was replaced
-
+        message_suffix = ""  
         # --- CASE 1: No duplicate_id → find and delete oldest summary ---
         if not duplicate_id:
-            print("ℹ️No duplicate_id provided — searching for oldest summary...")
+            print("No duplicate_id provided — searching for oldest summary...")
             summaries = list(file_dir.glob("*_summary.json"))
 
             if summaries:
                 oldest_file = min(summaries, key=os.path.getmtime)
                 delete_id = oldest_file.stem.replace("_summary", "")
-                print(f"🕰️Oldest summary found and will be replaced: {oldest_file.name}")
+                print(f"Oldest summary found and will be replaced: {oldest_file.name}")
 
                 # Delete both summary and data files
                 for suffix in ["_summary.json", "_compressed_data.pt"]:
                     path = file_dir / f"{delete_id}{suffix}"
                     if path.exists():
                         os.remove(path)
-                        print(f"🗑️Deleted old file: {path.name}")
+                        print(f"Deleted old file: {path.name}")
 
                 message_suffix = " by replacing the oldest compression."
             else:
-                print("⚠️No summaries found to delete.")
+                print("No summaries found to delete.")
                 message_suffix = "\nℹ️No prior compressions found — nothing replaced."
 
         # --- CASE 2: duplicate_id provided explicitly ---
         else:
-            print(f"♻️Replacing specific duplicate: {duplicate_id}")
+            print(f"Replacing specific duplicate: {duplicate_id}")
             for suffix in ["_summary.json", "_compressed_data.pt"]:
                 path = file_dir / f"{duplicate_id}{suffix}"
                 if path.exists():
                     os.remove(path)
-                    print(f"🗑️Deleted duplicate file: {path.name}")
+                    print(f"Deleted duplicate file: {path.name}")
 
             message_suffix = " by replacing the old duplicate."
 
@@ -596,10 +725,9 @@ def handle_replace_choice(compression_job_id: str, duplicate_id: Optional[str] =
 
         
         with open(file_dir / f"{compression_job_id}_summary.json", "w") as f:
-            f.write(active_compressed_data_obj.summary.json())
+            f.write(active_compressed_data_obj.summary.model_dump_json())
 
         final_message = f"✅Saved successfully{message_suffix}"
-        print(final_message)
 
         return JSONResponse(
             content={
@@ -609,16 +737,14 @@ def handle_replace_choice(compression_job_id: str, duplicate_id: Optional[str] =
         )
 
     except Exception as e:
-        print("❌ Replacement failed:", e)
+        print("Replacement failed:", e)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
-                "SaveMessage": f"❌ Replacement failed: {str(e)}",
+                "SaveMessage": f"❌Replacement failed: {str(e)}",
                 "RequireUserDecision": False
             }
         )
-
-
 
 
 
@@ -636,7 +762,7 @@ def download_compressed_data(compressionJobId: str, display_name: str | None = Q
 
 
 
-# ------------------User Dataset supports  ------------------
+# ------------------User Dataset supports  ------------------ #
 
 @app.get("/get_all_dataset_names", response_model=list[str])
 def get_all_dataset_names():
@@ -651,23 +777,18 @@ def get_all_dataset_labels():
 
 @app.delete("/delete_dataset/{dataset_name}")
 def delete_dataset(dataset_name: str):
-    """
-    Delete dataset entry from registry and remove any related directories.
-    """
-
-    # --- Delete from active dataset registry ---
-    # --- But keep it in the class registry, because the training history, compressed data may still need it
+    # --- Delete from active dataset registry
+    # --- But keep it in the class registry, 
+    # --- because the training history, compressed data may still need it
     success_deregistry = deactive_dataset(dataset_name)
 
     if not success_deregistry:
         raise HTTPException(status_code=404, detail="No dataset found for given dataset name")
 
-    # --- Define directories to delete ---
     paths_to_delete = [os.path.join(globals.DATA_PER_LABEL_DIR, dataset_name + f"_percent_{globals.USER_DATASET_PERCENT}"),
                         os.path.join(globals.RAW_DATA_DIR, dataset_name),
                         os.path.join(globals.ADJ_MATRIX_DIR, dataset_name) + f"_percent_{globals.USER_DATASET_PERCENT}"
                         ]
-    # --- Attempt deletion for each path ---
     success_delete_data = 0
     for path_to_delete in paths_to_delete:
         if os.path.exists(path_to_delete):
@@ -678,7 +799,6 @@ def delete_dataset(dataset_name: str):
             except Exception as e:
                 print(f"Failed to delete {path_to_delete}: {e}")
 
-   
     if success_delete_data == len(paths_to_delete):
         return {"message": f"✅Deleted '{dataset_name}'" }
     else:
@@ -694,27 +814,20 @@ async def upload_and_preprocess_user_dataset(file: UploadFile = File(...)):
         # Ensure it's a ZIP file
         if not file.filename.lower().endswith(".zip"):
             raise HTTPException(status_code=400, detail="Only .zip files are supported.")
-
         # Save uploaded file temporarily
         temp_path = os.path.join("/tmp", file.filename)
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-
         print(f"Received ZIP file: {temp_path}")
-
         # Extract dataset name (remove .zip extension)
         dataset_name = os.path.splitext(file.filename)[0]
         dataset_folder = os.path.join(globals.RAW_DATA_DIR, dataset_name)
-
         # Extract ZIP into the target directory
         with zipfile.ZipFile(temp_path, "r") as zip_ref:
             zip_ref.extractall(dataset_folder)
-
         # Cleanup the temp file
         os.remove(temp_path)
-
         print(f"Extracted dataset: {dataset_folder}")
-
 
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive.")
@@ -722,12 +835,11 @@ async def upload_and_preprocess_user_dataset(file: UploadFile = File(...)):
         print(f"Upload failed: {e}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
-
     try:
         create_train_data_obj(dataset_name, percent=100)
         return {
             "status": "success",
-            "message": f"✅ Dataset '{dataset_name}' preprocessed successfully"
+            "message": f"✅Dataset '{dataset_name}' preprocessed successfully"
         }
     except Exception as e:
         raise HTTPException(500, detail=f"Preprocessing failed: {str(e)}")
@@ -736,21 +848,16 @@ async def upload_and_preprocess_user_dataset(file: UploadFile = File(...)):
 
 
 
-
-
-
-
-# ------------------ Train history supports  ------------------
+# ------------------ Train history supports  ------------------ #
 @app.get("/train_history")
 def fetch_train_history():
     file_path = globals.TRAINING_HISTORY_PATH
-
     if not file_path.exists():
         return {"error": "No training history found"}
 
     try:
         with open(file_path, "r") as f:
-            history = json.load(f)  # this should already be a list
+            history = json.load(f)  
     except Exception as e:
         return {"error": f"Failed to load training history: {e}"}
 
@@ -768,7 +875,6 @@ def delete_history_items(train_id:str):
                 data = []
     else:
         data = []
-
     if not isinstance(data, list):
         data = [data]
 
@@ -789,9 +895,6 @@ def delete_history_items(train_id:str):
 
 @app.delete("/delete_all_history")
 def delete_all_history():
-    """
-    Clears (empties) the training history JSON file.
-    """
     history_path = globals.TRAINING_HISTORY_PATH
     if not os.path.exists(history_path):
         return JSONResponse(content={
@@ -803,212 +906,20 @@ def delete_all_history():
             json.dump([], f, indent=4)
         return JSONResponse(content={
             "status": "success",
-            "message": "🧹 Training history file cleared successfully."
+            "message": "Training history file cleared successfully."
         })
 
     except Exception as e:
         return JSONResponse(
             content={
                 "status": "error",
-                "message": f"❌ Failed to clear history file: {e}"
+                "message": f"Failed to clear history file: {e}"
             },
             status_code=500
         )
 
 
-# ------------------ Train  ------------------
-@app.post("/train")
-async def stream_training(req: BaseTrainRequest):
-
-    #cancel_event = multiprocessing.Event()
-    #progress_queue = multiprocessing.Queue()
-    ACTIVE_JOBS["training"][req.train_job_id] = {"cancel": False}
-
-    async def event_stream():
-        # Notify start
-
-        req_ = req.model_dump()
-        kind = req_.get("kind", "").lower()
-        if kind == "standard":
-            req_obj = StandardTrainRequest(**req_)
-        else:
-            req_obj = AdvTrainRequest(**req_)
-
-        data_path = globals.COMPRESSION_CONTAINER_DIR / f"{req_obj.data_info.get('data_id')}_compressed_data.pt"
-        res = torch.load(data_path, weights_only=False)
-        train_dataset = TensorDataset(res["train_x"], res["train_y"])
-        #train_loader = DataLoader(data_obj, batch_size=64, shuffle=True)
-        test_dataset = load_dataset(req_obj.data_info.get('dataset_name'), train_ = False)
-
-        #progress_queue.put({"type": "start"})
-        train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-        test_loader  = DataLoader(test_dataset, batch_size=64, shuffle=False)
-
-        sample, _ = train_dataset[0]
-        _in_channels = sample.shape[0] 
-        _num_classes = len(load_dataset_classes()[req_obj.data_info["dataset_name"]])
-        #print(f"inside training, channael is {_in_channels} , num of class is {_num_classes}")
-        model = ConvNet(in_channels=_in_channels, num_classes=_num_classes)
-
-        #eps_linf=0.3,
-        #eps_l2=1.5,
-
-        trainer = TR(model, train_loader, test_loader, eps_linf=globals.EPS_LINF, eps_l2=globals.EPS_L2)
-        
-        # Select optimizer
-        if req_obj.optimizer.lower() == "sgd":
-            opt = torch.optim.SGD(model.parameters(), lr=req_obj.learning_rate, momentum=0.9, weight_decay=5e-4)
-        elif req_obj.optimizer.lower() == "adam":
-            opt = torch.optim.Adam(model.parameters(), lr=req_obj.learning_rate, weight_decay=5e-4)
-        else:
-            raise ValueError(f"Unknown optimizer: {req_obj.optimizer}")
-
-
-        all_epochs = []
-        run_info = {"status": "started", 
-                             "train_job_id": req_obj.train_job_id,
-                             "timestamp": "",
-                             "epochs": [], 
-                             "req_obj": vars(req_obj)}
-
-        yield f"data: {json.dumps({'type': 'start'})}\n\n"
-        for epoch in range(1, req_obj.num_iterations+1):
-            await asyncio.sleep(0.2)
-            if ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:
-                #yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
-                break
-
-            epoch_path = globals.TMP_TRAIN_CHECKPOINT_DIR / f"{req_obj.train_job_id}_epoch_{epoch}.pt"
-            if req_obj.kind == "standard":                
-                train_acc, train_loss = trainer.epoch(train_loader, weight=False, opt=opt)
-                test_acc, test_loss = trainer.epoch(test_loader)
-
-                if (req_obj.num_iterations == epoch) and req_obj.require_adv_attack_test:   
-                    linf_adv_acc, linf_adv_loss = trainer.epoch_adv(test_loader, trainer.pgd_linf, weight=False, epsilon=trainer.eps_linf)
-                    #l2_adv_acc, l2_adv_loss = trainer.epoch_adv(test_loader, trainer.pgd_l2, weight=False, epsilon=trainer.eps_l2)
-                else:
-                    linf_adv_acc, linf_adv_loss = -1, -1
-                    #l2_adv_acc, l2_adv_loss = -1, -1
-
-                torch.save(model.state_dict(), epoch_path)
-                print(f"Saved temporary checkpoint: {epoch_path}")    
-
-            elif req_obj.kind == "adversarial":
-                attack = trainer.pgd_linf if req_obj.attack == "PGD-linf" else trainer.pgd_l2
-                train_acc, train_loss = trainer.epoch_adv(train_loader, attack=attack, weight=False, opt=opt, epsilon=req_obj.epsilon, alpha = req_obj.alpha  )
-                test_acc, test_loss = trainer.epoch(test_loader)
-
-                if (req_obj.num_iterations == epoch) and req_obj.require_adv_attack_test:  
-                    linf_adv_acc, linf_adv_loss = trainer.epoch_adv(test_loader, trainer.pgd_linf, weight=False, epsilon=trainer.eps_linf)
-
-                else:
-                    linf_adv_acc, linf_adv_loss = -1, -1
-                    #l2_adv_acc, l2_adv_loss = -1, -1
-
-                torch.save(model.state_dict(), epoch_path)
-                print(f"Saved temporary checkpoint: {epoch_path}")    
-
-            else:
-                print("ulalalalla, no such a kind of train")
-            epoch_data = {
-                "type": "epoch",
-                "epoch": epoch,
-                "train_acc": train_acc,
-                #"train_loss": train_loss,
-                "test_acc": test_acc,
-                #"test_loss": test_loss,
-                "linf_adv_acc": linf_adv_acc,
-                #"linf_adv_loss": linf_adv_loss,
-                #"l2_adv_acc": l2_adv_acc,
-                #"l2_adv_loss": l2_adv_loss,
-            }
-
-            all_epochs.append(epoch_data)
-            #yield f"data: {json.dumps({'epoch': epoch})}\n\n"
-            yield f"data: {json.dumps(epoch_data)}\n\n"
-
-        #progress_queue.put({"type": "done"})
-        if ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:            
-            run_info["status"]="cancelled"
-            
-        else:
-            run_info["status"]= "done"
-           
-            
-
-        run_info["epochs"] = all_epochs
-        run_info["timestamp"] = datetime.datetime.now().isoformat()
-
-
-        if os.path.exists(globals.TRAINING_HISTORY_PATH):
-            with open(globals.TRAINING_HISTORY_PATH, "r") as f:
-                try:
-                    history = json.load(f)
-                except json.JSONDecodeError:
-                    history = []
-        else:
-            history = []
-
-        if not isinstance(history, list):
-            history = [history]
-
-        # Append new run
-        history.append(run_info)
-
-        # Save back
-        with open(globals.TRAINING_HISTORY_PATH, "w") as f:
-            json.dump(history, f, indent=4)
-
-        print(f"Saved training result for job {run_info['train_job_id']}")
-
-        if ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:            
-            yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
-            
-        else:
-            #run_info["status"]= "done"
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-
-        ACTIVE_JOBS["training"].pop(req.train_job_id, None)
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-
-
-
-@app.delete("/cancel_train/{train_id}")
-def cancel_training(train_id: str):
-    job = ACTIVE_JOBS["training"].get(train_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job["cancel"]= True   # signal to worker
-    return {"status": "cancellation requested", "id": train_id}
-
-
-
-
-@app.delete("/delete_checkpoints/{trainId}")
-def delete_checkpoints(trainId: str):
-    folder_dir = globals.TMP_TRAIN_CHECKPOINT_DIR
-    if not folder_dir.exists():
-        return JSONResponse(content={"status": "ok", "message": "No checkpoint folder found."})
-
-    deleted_files = 0
-    # Delete all matching checkpoint files (trainId_epoch_*.pt)
-    for file in folder_dir.glob(f"{trainId}_epoch_*.pt"):
-        try:
-            file.unlink()
-            deleted_files += 1
-        except Exception as e:
-            print(f"⚠️ Could not delete {file}: {e}")
-
-    return JSONResponse(content={
-        "status": "success",
-        "message": f"🧹 Deleted {deleted_files} checkpoint files for {trainId}."
-    })
-
-# --- maintain trained model ---
+# ----------------- maintain trained model ----------------------- #
 
 @app.post("/save_model/{trainId}/{epoch}")
 def save_model(trainId: str, epoch: int, info: SavedModelInfo):
@@ -1024,7 +935,6 @@ def save_model(trainId: str, epoch: int, info: SavedModelInfo):
     save_path.mkdir(parents=True, exist_ok=True)
 
     model_id = info.model_id
-    # Copy model file
     dest_model_path = save_path / f"{model_id}.pt"
     shutil.copy2(checkpoint_path, dest_model_path)
 
@@ -1039,13 +949,13 @@ def save_model(trainId: str, epoch: int, info: SavedModelInfo):
         try:
             f.unlink()
         except Exception as e:
-            print(f"⚠️Failed to delete {f}: {e}")
+            print(f"Failed to delete {f}: {e}")
 
-    print(f"🧹Deleted checkpoints for {trainId}")
+    print(f"Deleted checkpoints for {trainId}")
 
     return JSONResponse(content={
         "status": "success",
-        "message": "✅Model saved."
+        "message": "Model saved."
     })
 
 
@@ -1055,7 +965,6 @@ def get_all_model_info():
     folder = globals.PERMANENT_TRAIN_MODELS_DIR
     if not folder.exists() or not folder.is_dir():
         return []
-
     model_infos = []
     for filename in os.listdir(folder):
         if filename.endswith("_info.json"):
@@ -1065,24 +974,18 @@ def get_all_model_info():
                     data = json.load(f)
                     model_infos.append(SavedModelInfo(**data))
             except Exception as e:
-                print(f"⚠️ Failed to load model info {filename}: {e}")
+                print(f"Failed to load model info {filename}: {e}")
                 continue
-
     return model_infos
 
 
 @app.delete("/delete_model/{modelId}")
 def delete_model(modelId: str):
-    """
-    Delete both the saved model file (.pt) and its info JSON.
-    """
-
+    #Delete both the saved model file (.pt) and its info JSON.
     folder_dir = globals.PERMANENT_TRAIN_MODELS_DIR
-
     if not folder_dir.exists():
         raise HTTPException(status_code=500, detail=f"Permanent model directory {folder_dir} does not exist")
 
-    # Define file paths
     model_path = folder_dir / f"{modelId}.pt"
     info_path = folder_dir / f"{modelId}_info.json"
 
@@ -1093,7 +996,7 @@ def delete_model(modelId: str):
             model_path.unlink()
             deleted_files += 1
         except Exception as e:
-            print(f"⚠️ Could not delete {model_path}: {e}")
+            print(f"Could not delete {model_path}: {e}")
 
     # Delete metadata file
     if info_path.exists():
@@ -1101,16 +1004,16 @@ def delete_model(modelId: str):
             info_path.unlink()
             deleted_files += 1
         except Exception as e:
-            print(f"⚠️ Could not delete {info_path}: {e}")
+            print(f"Could not delete {info_path}: {e}")
 
-    # Handle case where neither file exists
     if deleted_files != 2:
         raise HTTPException(status_code=404, detail=f"No saved model found for ID '{modelId}'")
 
     return JSONResponse(content={
         "status": "success",
-        "message": f"✅ Deleted model '{modelId}' and 2 related files."
+        "message": f"Deleted model '{modelId}' and 2 related files."
     })
+
 
 @app.delete("/delete_all_models")
 def delete_all_models():
@@ -1126,11 +1029,11 @@ def delete_all_models():
             try:
                 file.unlink()
             except Exception as e:
-                print(f"⚠️ Could not delete {file}: {e}")
+                print(f"Could not delete {file}: {e}")
 
     return JSONResponse(content={
         "status": "success",
-        "message": f"🧹 Deleted all model files."
+        "message": f"Deleted all model files."
     })
 
 
@@ -1140,18 +1043,13 @@ def download_model(model_id: str, display_name: str | None = Query(default=None)
     file_path = globals.PERMANENT_TRAIN_MODELS_DIR / f"{model_id}.pt"
     if not file_path.exists():
         return {"error": f"Model {model_id} not found."}
-
     # sanitize fallback
     filename = display_name if display_name else f"{model_id}.pt"
     return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
 
 
-
 @app.post("/evaluate_model")
 def evaluate_model(req: EvaluationRequest):
-    """
-    Load a trained model and evaluate it directly (no worker).
-    """
     model_path = globals.PERMANENT_TRAIN_MODELS_DIR / f"{req.model_id}.pt"
 
     if not model_path.exists():
@@ -1168,7 +1066,7 @@ def evaluate_model(req: EvaluationRequest):
 
 
 
-# ------------------ Local run (for development) ------------------
+# ------------------ Local run (for development) ------------------ #
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=True)
