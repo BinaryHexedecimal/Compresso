@@ -1,4 +1,4 @@
-// --- 1️⃣ Register the .NET reference (Blazor sends it once) ---
+// ---Register the .NET reference (Blazor sends it once) ---
 window.setDotNetRefForGraph = function(dotNetRef) {
     window.DotNetRefForGraph = dotNetRef;
     console.log("✅ .NET reference registered for Plotly interop");
@@ -6,7 +6,7 @@ window.setDotNetRefForGraph = function(dotNetRef) {
 
 
 
-// --- 2️⃣ Main render function ---
+// ---Main render function ---
 window.ensurePlotlyReadyAndRender = async (divRef, figJson, label) => { 
     
     let div = divRef instanceof HTMLElement ? divRef : document.getElementById(divRef);
@@ -27,29 +27,29 @@ window.ensurePlotlyReadyAndRender = async (divRef, figJson, label) => {
 
     plot.on('plotly_click', function(data) 
     { 
-        console.log("🔥 plotly_click event fired!", data);
+        console.log("plotly_click event fired!", data);
         const point = data.points[0]; 
         const nodeIndex = point?.customdata; 
         const x = point?.x; 
         const y = point?.y; 
 
-        // ✅ Detect center node by trace name 
+        // Detect center node by trace name 
         const isCenterNode = point?.data?.name === 'Highlighted Nodes'; 
 
         if (!isCenterNode) return; 
-        // ✅ Highlight edges connected to that center 
+        // Highlight edges connected to that center 
         highlightEdges(plot, nodeIndex); 
 
         if (window.DotNetRefForGraph && nodeIndex !== undefined) 
             { window.DotNetRefForGraph.invokeMethodAsync( 
                     "OnCenterNodeClicked", nodeIndex, x, y, label 
-                ).catch(err => console.error("❌ Failed OnCenterNodeClicked:", err));
+                ).catch(err => console.error("Failed OnCenterNodeClicked:", err));
             } 
     }); 
 
     plot.on('plotly_hover', function(data) 
     { 
-        console.log("🔥 plotly_hover event fired!", data);
+        console.log("plotly_hover event fired!", data);
         const point = data.points[0]; 
         const nodeIndex = point?.customdata; 
         const x = point?.x; 
@@ -61,7 +61,7 @@ window.ensurePlotlyReadyAndRender = async (divRef, figJson, label) => {
         if (window.DotNetRefForGraph && nodeIndex !== undefined) 
             { window.DotNetRefForGraph.invokeMethodAsync( 
                 "OnNodeHovered", nodeIndex, x, y, label 
-            ).catch(err => console.error("❌ Failed OnNodeHovered:", err)); } 
+            ).catch(err => console.error("Failed OnNodeHovered:", err)); } 
     }); 
 
 
@@ -74,17 +74,15 @@ window.ensurePlotlyReadyAndRender = async (divRef, figJson, label) => {
 
 
 
-// === 🟥 Persistent highlight for clicked center node ===
+// === Persistent highlight for clicked center node ===
 window.highlightCenterNode = function(divRef, connectedEdges, x, y, imageDataUrl) {
 
-    //const div = document.getElementById("yourDivId");
     const div = divRef instanceof HTMLElement ? divRef : document.getElementById(divRef);
 
-    console.log(div._ev); // Should be undefined, but Plotly stores listeners internally
+    console.log(div._ev); 
 
     console.log(window.getEventListeners(div)); 
 
-    //const div = divRef instanceof HTMLElement ? divRef : document.getElementById(divRef);
     if (!div || !window.Plotly) return;
 
     // Reset previous highlights
@@ -134,7 +132,7 @@ window.highlightCenterNode = function(divRef, connectedEdges, x, y, imageDataUrl
     window.lastHighlightedEdges = connectedEdges;
 };
 
-// === 🟦 Temporary hover image (no highlight) ===
+// ===Temporary hover image (no highlight) ===
 window.showHoverImage = function(divRef, imageDataUrl, x, y) {
     const div = divRef instanceof HTMLElement ? divRef : document.getElementById(divRef);
     if (!div || !window.Plotly) return;
@@ -154,7 +152,7 @@ window.showHoverImage = function(divRef, imageDataUrl, x, y) {
 };
 
 
-// === 🧹 Clear only hover image (keep center highlight) ===
+// === Clear only hover image (keep center highlight) ===
 window.clearHoverImage = function(divRef) {
     const div = divRef instanceof HTMLElement ? divRef : document.getElementById(divRef);
     if (!div || !window.Plotly) return;
@@ -166,10 +164,10 @@ window.clearHoverImage = function(divRef) {
 
 
 
-// === 🧠 Helper: add image overlay ===
+// === Helper: add image overlay ===
 window.addNodeImage = function (divRef, imageDataUrl, x, y, tag = "default") {
 
-    console.log("🖼️ addNodeImage called", { imageDataUrl, x, y, tag });
+    console.log("addNodeImage called", { imageDataUrl, x, y, tag });
 
     const div = divRef instanceof HTMLElement ? divRef : document.getElementById(divRef);
     if (!div || !window.Plotly) return;
@@ -197,7 +195,7 @@ window.addNodeImage = function (divRef, imageDataUrl, x, y, tag = "default") {
     Plotly.relayout(div, { images: updatedImages });
 };
 
-// === 🧹 Helper: clear images by tag ===
+// === Helper: clear images by tag ===
 window.clearNodeImage = function (divRef, tag = "default") {
     const div = divRef instanceof HTMLElement ? divRef : document.getElementById(divRef);
     if (!div || !window.Plotly) return;
@@ -231,7 +229,7 @@ async function highlightEdges(div, nodeIndex) {
         }
     });
 
-    // ✅ Single batch update
+    // Single batch update
     await Plotly.restyle(div, {
         'line.color': colors,
         'line.width': widths

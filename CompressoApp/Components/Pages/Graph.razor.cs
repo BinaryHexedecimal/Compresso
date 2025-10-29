@@ -20,8 +20,6 @@ public partial class Graph : ComponentBase
     private ElementReference _graphDivRef;
     private string _pendingFigJson= string.Empty;
 
-    private void Nav(string path) => NavManager.NavigateTo(path);
-
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) { return; }

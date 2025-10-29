@@ -58,28 +58,4 @@
 </div>
 
 
-    @*@code {
-    
- [Inject] NavigationManager Nav { get; set; } = default!;
-    [Inject] IJSRuntime JS { get; set; } = default!; 
-    //[Inject] protected UserStateService UserState { get; set; } = default!;
 
-
-    @* protected override void OnInitialized()
-    {
-        Console.WriteLine("NavMenu OnChange triggered, UserEmail=" + UserState.UserEmail);
-        Console.WriteLine($"NavMenu component: {UserState.GetHashCode()}");
-
-        UserState.OnChange += StateHasChanged;
-    } *@
-
-    @* public void Dispose()
-    {
-        UserState.OnChange -= StateHasChanged;
-    } 
-
-
-
-
-}
-*@

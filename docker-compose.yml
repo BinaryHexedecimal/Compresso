@@ -18,7 +18,7 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
       interval: 30s     # check every 30 seconds
       timeout: 10s      # give curl up to 10s
-      retries: 60       # allow up to 60 failed checks (≈30 minutes total)
+      retries: 80       # allow up to 80 failed checks (so roughly 40 minutes in total)
       start_period: 120s  # wait 2 minutes before starting checks
 
   frontend:

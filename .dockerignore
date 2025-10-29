@@ -3,17 +3,8 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+.env
 
-# Temporary / generated data
-# data/
-# outputs/
-# tmp/
-# *.log
-# *.zip
-# *.tar
-# *.pth
-# *.pt
-# checkpoints/
 
 # Git
 .git/

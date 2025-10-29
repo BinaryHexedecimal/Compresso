@@ -9,8 +9,6 @@ public partial class CompressedContainer : ComponentBase
 {
     [Inject] private ApiClient Api { get; set; } = default!;
     [Inject] private NavigationManager NavManager { get; set; } = default!;
-    //[Inject] private SummaryLoadService SummaryService { get; set; } = default!;
-    //[Inject] private TrainStateService TrainState { get; set; } = default!;
     [Inject] private IServiceProvider Services { get; set; } = default!;
     private string backendUrl = string.Empty;
     private BackendUrls? backendUrls;
@@ -28,11 +26,7 @@ public partial class CompressedContainer : ComponentBase
 
     private void HandleTrain()
     {
-        // Optional: Show a status message or refresh summaries
         Nav($"/Train");
-        //DefaultDataId = jobId;
-        //DefaultSummary = await Api.LoadSummaryFromContainerAsync(jobId);
-
     }
 
     private void Nav(string path) => NavManager.NavigateTo(path);
@@ -50,7 +44,7 @@ public partial class CompressedContainer : ComponentBase
     {
         bool confirm = await JS.InvokeAsync<bool>(
             "confirm",
-            new object[] { "⚠️ This will delete ALL data permanently. Are you sure?" }
+            new object[] { "This will delete ALL data permanently. Are you sure?" }
         );
         if (!confirm)
             return;

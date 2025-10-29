@@ -1,16 +1,15 @@
-from torchvision import datasets, transforms
-import torch
-import random
-from torch.utils.data import TensorDataset, Subset
+#import random
+#from torch.utils.data import TensorDataset, Subset
 import json
 import os, glob
 from PIL import Image
-
+from torchvision import datasets, transforms
+import torch
 
 
 from models import OriginDatasetPerLabel
 import globals
-from src import MFC
+#from src import MFC
 
 
 # ------------------register dataset labels ------------------ #
@@ -131,12 +130,12 @@ def load_user_dataset(dataset_name: str, train_: bool = True):
 
 
 def prepare_train_data(dataset_name:str, percent: int):
-    dataset = load_dataset(dataset_name, train_ = True)
+    _ = load_dataset(dataset_name, train_ = True)
     create_train_data_obj(dataset_name, percent)
 
 
 def prepare_test_data(dataset_name:str):
-    dataset = load_dataset(dataset_name, train_ = False)
+    _ = load_dataset(dataset_name, train_ = False)
 
 
 def load_dataset(dataset_name: str, train_: bool = True):
@@ -180,15 +179,10 @@ def create_train_data_obj(dataset_name: str, percent: int) :
     dataset_name = dataset_name.lower()
     out_dir = globals.DATA_PER_LABEL_DIR
 
-    #save_path = out_dir / f"{dataset_name}_percent_{percent}"
-
-
     if dataset_name in globals.BUILT_IN_DATASET_NAMES:
         save_path = out_dir/f"{dataset_name}_percent_{globals.BUILT_IN_DATASET_PERCENT}"
     else:
         save_path = out_dir/f"{dataset_name}_percent_{globals.USER_DATASET_PERCENT}"
-
-
 
     if os.path.exists(save_path):
         print(f"Origin data object per label already exists at {save_path}")
@@ -218,66 +212,16 @@ def create_train_data_obj(dataset_name: str, percent: int) :
             selected_imgs = imgs[:take_count]
             stacked_tensor = torch.stack(selected_imgs)  # shape: (N_class, C, H, W)
 
-            # --- Compute adjacency matrices ---
-            # A_norm_dict = {}
-            # for norm in ["L1", "L2", "MAX"]:
-            #     norm_float = globals.NORM_MAP[norm]
-            #     mfc = MFC(stacked_tensor, norm=norm_float)
-            #     A = mfc.distanceMatrix()
-            #     A_norm_dict[norm] = A
-
             # --- Package into OriginDatasetObj ---
             data_obj = OriginDatasetPerLabel(
                 dataset_name=dataset_name,
                 stacked_tensor=stacked_tensor,
-                #adjMatrix_dict=A_norm_dict,
                 label=classes[idx]  # still store the readable names
             )
 
             # --- Save object ---
             torch.save(data_obj, save_path / f"{classes[idx]}.pt")
 
-
-
-
-# def create_test_data_obj(dataset_name: str, percent: int):
-#     dataset_name = dataset_name.lower()
-#     dir = globals.TEST_DATA_DIR
-#     os.makedirs(dir, exist_ok=True)
-#     path = os.path.join(dir, f"{dataset_name}_test.pt")
-#     if os.path.exists(path):
-#         print(f"Test data already exist.")
-#     else:
-#         print(f"Downloading and preparing {dataset_name} test dataset...")
-#         test_dataset  = load_dataset(dataset_name, train_=False)
-
-#         # Convert datasets to stacked tensors
-#         test_x  = torch.stack([x for x, y in test_dataset])
-#         test_y  = torch.tensor([y for x, y in test_dataset])
-
-#         # Wrap into TensorDataset
-#         data_obj = TensorDataset(test_x, test_y)
-
-#         # Randomly sample a fraction of the dataset
-#         total_len = len(data_obj)
-#         sample_size = max(1, int(total_len * percent / 100))
-#         indices = random.sample(range(total_len), sample_size)
-#         subset_obj = Subset(data_obj, indices)
-#         torch.save(subset_obj, path)
-
-# def preprocess_data_to_obj(dataset_name: str, train_percent: int = 100, test_percent:int = 100):
-#     create_train_data_obj(dataset_name=dataset_name, percent=train_percent)
-#     #create_test_data_obj(dataset_name=dataset_name, percent=test_percent)
-    
-
-# ------------------------prepare the data into trainable format----------------------#
-
-# The saved data_obj is a torch.utils.data.TensorDataset.
-# It holds two tensors: train_x (features) and train_y (labels).
-# It can be use as:
-# saved = torch.load("xxxxxxxx.pt")
-# data_obj = TensorDataset(saved["train_x"], saved["train_y"])
-# train_loader = DataLoader(data_obj, batch_size=64, shuffle=True)
 
 
 def save_trainable_data_in_container(
@@ -296,10 +240,6 @@ def save_trainable_data_in_container(
 
     train_x = torch.cat(all_x, dim=0)
     train_y = torch.cat(all_y, dim=0)
-
-    # Create TensorDataset
-    #data_obj = TensorDataset(train_x, train_y)
-
 
     save_path = globals.COMPRESSION_CONTAINER_DIR / f"{compression_job_id}_compressed_data.pt"
     torch.save({
@@ -324,8 +264,6 @@ def prepare_trainable_data(compressed_dict: dict, dataset_name: str):
     train_x = torch.cat(all_x, dim=0)
     train_y = torch.cat(all_y, dim=0)
 
-    # Create TensorDataset
-    # data_obj = TensorDataset(train_x, train_y)
     res = {
         "train_x": train_x,
         "train_y": train_y,

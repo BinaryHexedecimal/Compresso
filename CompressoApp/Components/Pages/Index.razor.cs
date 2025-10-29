@@ -45,7 +45,7 @@ public partial class Index : ComponentBase
         {
             if (!DatasetInfoManager.Labels.ContainsKey(datasetName))
             {
-                Console.WriteLine($"⚠️ No labels found for dataset '{datasetName}'");
+                Console.WriteLine($"No labels found for dataset '{datasetName}'");
                 return;
             }
 
@@ -53,7 +53,7 @@ public partial class Index : ComponentBase
 
             if (labels == null || labels.Count == 0)
             {
-                Console.WriteLine($"⚠️ Empty label list for dataset '{datasetName}'");
+                Console.WriteLine($"Empty label list for dataset '{datasetName}'");
                 return;
             }
 

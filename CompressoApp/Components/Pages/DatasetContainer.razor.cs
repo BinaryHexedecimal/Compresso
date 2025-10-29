@@ -93,12 +93,10 @@ public partial class DatasetContainer : ComponentBase
             return;
         }
 
-        // Save to temporary path
-        //GetTempPath
         var tmpPath = Path.Combine(Path.GetTempPath(), file.Name);
 
         await using (var stream = File.Create(tmpPath))
-            // maximum, 2 G
+        // maximum, 2 G
         await file.OpenReadStream(maxAllowedSize: 2_000_000_000).CopyToAsync(stream);
 
         var tmpUnpackFolder = Path.Combine(Path.GetTempPath(), "unPack_"+Path.GetFileNameWithoutExtension(file.Name));
@@ -161,7 +159,7 @@ public partial class DatasetContainer : ComponentBase
 
             if (innerTarFile != null)
             {
-                Console.WriteLine($"📦 Found nested TAR file: {innerTarFile}");
+                Console.WriteLine($"Found nested TAR file: {innerTarFile}");
                 using (var innerArchive = SharpCompress.Archives.Tar.TarArchive.Open(innerTarFile))
                 {
                     foreach (var entry in innerArchive.Entries.Where(e => !e.IsDirectory))
@@ -174,7 +172,7 @@ public partial class DatasetContainer : ComponentBase
                     }
                 }
                 File.Delete(innerTarFile);
-                Console.WriteLine($"✅ Extracted and removed nested TAR file: {innerTarFile}");
+                Console.WriteLine($"Extracted and removed nested TAR file: {innerTarFile}");
             }
             else if (innerTarFolder != null)
             {
@@ -205,7 +203,7 @@ public partial class DatasetContainer : ComponentBase
 
                 if (innerName == outerName)
                 {
-                    Console.WriteLine($"📁 Detected same-name nested folder: {innerDir}");
+                    Console.WriteLine($"Detected same-name nested folder: {innerDir}");
                     foreach (var dir in Directory.GetDirectories(innerDir))
                     {
                         var dest = Path.Combine(tmpUnpackFolder, Path.GetFileName(dir));
@@ -245,7 +243,7 @@ public partial class DatasetContainer : ComponentBase
 
             Console.WriteLine($"Recompressed validated dataset: {compressedPath}");
 
-            // ✅ Send compressed file to backend via HTTP
+            // Send compressed file to backend via HTTP
             using var content = new MultipartFormDataContent();
             await using var fileStream = File.OpenRead(compressedPath);
             var fileContent = new StreamContent(fileStream);
@@ -256,11 +254,11 @@ public partial class DatasetContainer : ComponentBase
 
             if (response.IsSuccessStatusCode)
             {
-                msg = "✅ Upload successful!";
+                msg = "✅Upload successful!";
             }
             else
             {
-                msg = $"⚠️ Upload failed: {response.ReasonPhrase}";
+                msg = $"⚠️Upload failed: {response.ReasonPhrase}";
             }
 
             msg = "✅Upload successful!";
@@ -278,14 +276,14 @@ public partial class DatasetContainer : ComponentBase
                 if (File.Exists(tmpPath))
                 {
                     File.Delete(tmpPath);
-                    Console.WriteLine($"🧹 Deleted temporary file: {tmpPath}");
+                    Console.WriteLine($"Deleted temporary file: {tmpPath}");
                 }
 
                 // Delete temporary unpack folder
                 if (Directory.Exists(tmpUnpackFolder))
                 {
                     Directory.Delete(tmpUnpackFolder, true);
-                    Console.WriteLine($"🧹 Deleted temporary unpack folder: {tmpUnpackFolder}");
+                    Console.WriteLine($"Deleted temporary unpack folder: {tmpUnpackFolder}");
                 }
 
                 // Delete recompressed dataset zip
@@ -293,12 +291,12 @@ public partial class DatasetContainer : ComponentBase
                 if (File.Exists(compressedPath))
                 {
                     File.Delete(compressedPath);
-                    Console.WriteLine($"🧹 Deleted recompressed file: {compressedPath}");
+                    Console.WriteLine($"Deleted recompressed file: {compressedPath}");
                 }
             }
             catch (Exception cleanupEx)
             {
-                Console.WriteLine($"⚠️ Cleanup error: {cleanupEx.Message}");
+                Console.WriteLine($"Cleanup error: {cleanupEx.Message}");
             }
 
             await LoadDatasetNamesAsync();
@@ -340,7 +338,7 @@ public partial class DatasetContainer : ComponentBase
             }
 
             Directory.Delete(innerDir, true);
-            Console.WriteLine($"✅Flattened nested folder structure");
+            Console.WriteLine($"Flattened nested folder structure");
         }
 
         // Clean up macOS junk
@@ -350,19 +348,19 @@ public partial class DatasetContainer : ComponentBase
         foreach (var junkDir in Directory.GetDirectories(datasetFolder, "*", SearchOption.AllDirectories)
                 .Where(d => ignoreDirs.Contains(Path.GetFileName(d))))
         {
-            Console.WriteLine($"🧹 Removing junk folder: {junkDir}");
+            Console.WriteLine($"Removing junk folder: {junkDir}");
             Directory.Delete(junkDir, true);
         }
 
         foreach (var junk in Directory.GetFiles(datasetFolder, ".DS_Store", SearchOption.AllDirectories))
         {
-            Console.WriteLine($"🧹 Removing junk file: {junk}");
+            Console.WriteLine($"Removing junk file: {junk}");
             File.Delete(junk);
         }
 
         foreach (var junk in Directory.GetFiles(datasetFolder, "._*", SearchOption.AllDirectories))
         {
-            Console.WriteLine($"🧹 Removing AppleDouble file: {junk}");
+            Console.WriteLine($"Removing AppleDouble file: {junk}");
             File.Delete(junk);
         }
     }
@@ -378,8 +376,6 @@ public partial class DatasetContainer : ComponentBase
         {
             // Skip junk
             var folderName = Path.GetFileName(folder);
-            // if (ignoreFolders.Contains(folderName))
-            //     return true;
 
             // Check for images directly in this folder
             var images = Directory.GetFiles(folder, "*.*")
@@ -394,7 +390,7 @@ public partial class DatasetContainer : ComponentBase
             var subfolders = Directory.GetDirectories(folder);
             if (subfolders.Length == 0)
             {
-                Console.WriteLine($"⚠️ No images found in class folder: {folder}");
+                Console.WriteLine($"No images found in class folder: {folder}");
                 return false;
             }
 

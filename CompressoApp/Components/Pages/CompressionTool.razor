@@ -1,5 +1,4 @@
 @page "/compression"
-@* @page "/compression/new" *@
 
 @rendermode InteractiveServer
 
@@ -15,19 +14,12 @@
         <!-- Set Parameters -->
         <div class="col-md-12 mb-3">
             <label class="form-label fw-bold">Dataset</label>
-@* 
-            <DatasetSelector @bind-Value="DatasetName"
-                 Disabled="@(IsCompressing || HasFinished)" /> *@
-            
             <DatasetSelector 
                 Value="DatasetName"
                 ValueChanged="OnDatasetChanged"
                 Disabled="@(IsCompressing 
                 || HasFinished
-                || IsCancelling)" 
-            />
-
-            
+                || IsCancelling)" />
         </div>
 
         <div class="col-md-12 mb-3">
@@ -39,7 +31,8 @@
         <div class="col-md-12 mb-3 ">
             <label class="form-label fw-bold">Optimizer</label> 
             <OptimizerSelector @bind-Value="Optimizer" 
-                Disabled="@(IsCompressing || HasFinished)" />
+                Disabled="@(IsCompressing || HasFinished)" 
+                Gurobi=@Gurobi />
         </div>
 
         <div class="col-md-12 mb-3 "> 
@@ -166,13 +159,7 @@
                 New compression
             </button>
         </div>
-        @* <div class="col-md-12 mb-3"> 
-        <button class="action-btn primary" 
-                style="width: 220px;"
-                @onclick="() => GoToTrain()">
-            Train
-        </button>
-        </div> *@
+
         <div class="col-md-12 mb-3"> 
         <button class="action-btn primary" 
                 style="width: 220px;"

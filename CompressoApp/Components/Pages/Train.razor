@@ -3,37 +3,6 @@
 
 @rendermode InteractiveServer
 
-<div class="col-md-8 d-flex align-items-center justify-content-between">
-    <!-- Back button -->
-    @* <div style="width:330px;">
-        <button @onclick="GoBackToCompression"
-                class="action-btn primary w-100"
-                disabled="@(IsPreparingForTraining
-                            || IsTraining 
-                            || IsTerminating)">
-            Back to Compression
-        </button>
-    </div> *@
-
-    <!-- New button or placeholder -->
-    @if (HasCompleted || HasTerminated)
-    {
-        <div style="width:330px;">
-            <button @onclick= "async () => {await NewTrainingAsync();}"
-                    class="action-btn primary w-100">
-                New Training
-            </button>
-        </div>
-    }
-    else
-    {
-        <!-- invisible placeholder keeps layout identical -->
-        <div style="width:330px; visibility:hidden;">
-            <button class="action-btn primary w-100"></button>
-        </div>
-    }
-</div>
-
 
 <h2 class="mb-4">Train Your Model</h2>
 
@@ -43,18 +12,38 @@
     @if (IsTraining)
     {
         <div class="d-flex align-items-center gap-2">
-            <button class="btn btn-secondary" disabled style="width:400px">
+            <button class="btn btn-secondary" disabled style="width:320px">
                 <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                 &nbsp;Running...
             </button>
             <button @onclick="CancelTraining" 
                 class="btn btn-danger"
                 disabled="@(IsTerminating)"
-                style="width: 240px;">
+                style="width: 320px;">
                 @(IsTerminating ? "Terminating..." : "Terminate")
             </button>
         </div>
 
+    }
+    else if (IsTerminating)
+    {
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-danger" disabled style="width:640px">
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                &nbsp;Terminating...
+            </button>
+
+        </div>
+
+    }
+    else if (HasCompleted || HasTerminated)
+    {
+        <div class="d-flex align-items-center gap-2">
+            <button @onclick= "async () => {await NewTrainingAsync();}"
+                    class="action-btn primary" style="flex: 0 0 650px">
+                New Training 
+            </button>
+        </div>
     }
     else
     {
@@ -354,13 +343,13 @@
            
             @if (HasCompleted || HasTerminated)
             {
-                <span>Final Epoch (@EpochMetricsList.Last().Epoch]):</span> <br/>
-                <span>Test_acc = @FormatValue(EpochMetricsList.Last().TestAcc)</span> 
+                <span>Final Epoch (@EpochMetricsList.Last().Epoch):</span> <br/>
+                <span>Test accuracy = @FormatValue(EpochMetricsList.Last().TestAcc)</span> <br/>
             }
             @if ((HasCompleted || HasTerminated) && RequireFinalAdvAttackTest)
             {
                
-                <span>, Adv_linf_test = @FormatValue(EpochMetricsList.Last().AdvAcc)</span><br/>
+                <span>Adv test accuracy (L_inf)= @FormatValue(EpochMetricsList.Last().AdvAcc)</span><br/>
             }
             else{
                 <span>&nbsp;</span><br />

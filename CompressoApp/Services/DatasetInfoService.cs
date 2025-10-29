@@ -51,7 +51,7 @@ public class DatasetInfoService
         };
     }
 
-    // 🔥 Load or refresh from backend (can be called at startup or after adding dataset)
+    // Load or refresh from backend (can be called at startup or after adding dataset)
     public async Task RefreshFromBackendAsync()
     {
         try

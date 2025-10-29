@@ -50,6 +50,7 @@ class SavedModelInfo(BaseModel):
     dataset_name: str
     k: int
     kind: str
+    test_acc: float
 
 
 class BaseTrainRequest(BaseModel):
@@ -72,10 +73,4 @@ class AdvTrainRequest(BaseTrainRequest):
     epsilon: float = 0.3
     alpha: float = 0.01
 
-
-class EvaluationRequest(BaseModel):
-    evaluation_id: str
-    dataset_name: str
-    model_id: str
-    train_: bool = False   # optional, default = test
 

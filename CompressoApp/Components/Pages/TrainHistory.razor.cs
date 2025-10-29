@@ -1,7 +1,6 @@
 using CompressoApp.Models;
 using CompressoApp.Services;
 using Microsoft.AspNetCore.Components;
-//using Microsoft.Extensions.Configuration.UserSecrets;
 
 
 namespace CompressoApp.Components.Pages;
@@ -26,7 +25,6 @@ public partial class TrainHistory : ComponentBase
         history = await Api.GetHistoryAsync();
         await InvokeAsync(StateHasChanged);
     }
-
 
     private void ShowEpochs(string trainId)
     {

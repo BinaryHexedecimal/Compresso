@@ -16,6 +16,33 @@ public class ApiClient
 
 
     // --------------------- Compression -------------------------//
+
+    public async Task<bool> GetGurobiStatusAsync()
+    {
+        try
+        {
+            var response = await _http.GetAsync("/gurobi-status");
+            if (!response.IsSuccessStatusCode)
+                return false;
+
+            var content = await response.Content.ReadAsStringAsync();
+
+            using var doc = JsonDocument.Parse(content);
+            if (doc.RootElement.TryGetProperty("gurobi_valid", out var value))
+            {
+                return value.GetBoolean();
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error checking Gurobi status: {ex.Message}");
+            return false;
+        }
+    }
+
+
     public async Task<StartCompressionResponse?> StartCompressionAsync(CompressRequest req)
     {
         var json = JsonSerializer.Serialize(req);
@@ -51,7 +78,6 @@ public class ApiClient
         var result = await _http.GetFromJsonAsync<List<string>>(url);
         return result ?? new List<string>();
     }
-
 
     public async Task<List<string>> GetCompressedImagesAsync(string compression_job_id, string label, int n)
     {
@@ -100,8 +126,6 @@ public class ApiClient
 
     public async Task<string> DeleteGraphDataAsync(string compressionId)
     {
-        Console.WriteLine(compressionId);
-        Console.WriteLine("what is worng? not inisede??");
         var response = await _http.DeleteAsync($"/delete_graph_data/{compressionId}");
         if (!response.IsSuccessStatusCode)
             return $"Failed: {response.StatusCode}";
@@ -137,7 +161,8 @@ public class ApiClient
         });
         return response?.Summary;
     }
-
+    
+    // --------------------- Container maintainence -------------------------//
 
     public async Task<string> DeleteContainerDataAsync(string compression_job_id)
     {
@@ -175,19 +200,6 @@ public class ApiClient
             ?? new List<CompressionSummary>();
     }
 
-    // public async Task<CompressionSummary> LoadSummaryFromContainerAsync(string compression_job_id)
-    // {
-    //     var response = await _http.GetFromJsonAsync<CompressionSummary>(
-    //         $"/summary_from_container/{compression_job_id}");
-
-    //     if (response == null)
-    //         throw new InvalidOperationException($"Summary not found for {compression_job_id}");
-    //     return response;
-    // }
-
-
-
-    // --------------------- Maintain compressed data in container and graphs -------------------------//
 
     public async Task<SaveResponse> SaveCompressionAsync(string compression_job_id)
     {
@@ -220,9 +232,6 @@ public class ApiClient
 
 
 
-
-
-
     // --------------------- Maintain saved models -------------------------//
 
     public async Task<List<SavedModelInfo>> GetSavedModelInfoAsync()
@@ -250,7 +259,6 @@ public class ApiClient
 
     public async Task<string> DeleteCheckpointsAsync(string trainId)
     {
-        Console.WriteLine(trainId);
         var response = await _http.DeleteAsync($"/delete_checkpoints/{trainId}");
         if (!response.IsSuccessStatusCode)
             return $"Failed: {response.StatusCode}";
@@ -258,10 +266,6 @@ public class ApiClient
         var result = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
         return result?["message"] ?? "Unknown response";
     }
-
-
-
-    // Delete a specific saved model
 
     public async Task<string> DeleteModelAsync(string modelId)
     {
@@ -283,7 +287,7 @@ public class ApiClient
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"⚠️ Could not parse JSON: {ex.Message}");
+                Console.WriteLine($"Could not parse JSON: {ex.Message}");
             }
 
             return string.IsNullOrWhiteSpace(responseText)
@@ -401,9 +405,7 @@ public class ApiClient
     {
         try
         {
-            Console.WriteLine("????");
             var response = await _http.DeleteAsync("/delete_all_history");
-
             if (!response.IsSuccessStatusCode)
                 return $"❌ Failed: {response.StatusCode}";
 
@@ -423,35 +425,6 @@ public class ApiClient
     {
         await _http.DeleteAsync($"/cancel_train/{train_id}");
     }
-
-
-
- // --------------------- Evaluation -------------------------//
-public async Task<double?> EvaluateModelAsync(EvaluationRequest req)
-{
-    try
-    {
-        var response = await _http.PostAsJsonAsync("/evaluate_model", req);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var errorText = await response.Content.ReadAsStringAsync();
-            Console.WriteLine($"[EvaluateModelAsync] Error: {response.StatusCode}, {errorText}");
-            return null;
-        }
-
-        // Expect backend to return { "accuracy": 0.9231 }
-        var json = await response.Content.ReadFromJsonAsync<Dictionary<string, double>>(
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-        return json != null && json.ContainsKey("accuracy") ? json["accuracy"] : null;
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"[EvaluateModelAsync] Exception: {ex.Message}");
-        return null;
-    }
-}
 
 
 

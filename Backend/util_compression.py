@@ -1,7 +1,5 @@
 import torch
 from src import MFC
-import multiprocessing
-import time
 import numpy as np
 import networkx as nx
 import math
@@ -15,10 +13,7 @@ import globals
 
 
 def compress_MFC_per_label(label: str,
-                           #data_tensor: torch.Tensor,
-                           # A: torch.Tensor,
                             req: CompressRequest,
-                            #cancel_callback=lambda: False,
                             num_per_center=globals.NUM_IMAGE_INSIDE_ETA,
                         ):
 
@@ -32,8 +27,6 @@ def compress_MFC_per_label(label: str,
     else:
         path = f"{globals.DATA_PER_LABEL_DIR}/{req.dataset_name}_percent_{globals.USER_DATASET_PERCENT}/{label}.pt"
 
-
-    #path = f"{globals.DATA_PER_LABEL_DIR}/{req.dataset_name}_percent_{globals.BUILT_IN_DATASET_PERCENT}/{label}.pt"
     obj = torch.load(path, weights_only=False)
 
     data_tensor = obj.stacked_tensor
@@ -49,12 +42,11 @@ def compress_MFC_per_label(label: str,
     # Folder where the .pt file will be stored
     A_dir = os.path.join(globals.ADJ_MATRIX_DIR, subdir)
 
-    # ✅ Ensure the subfolder exists
+    # Ensure the subfolder exists
     os.makedirs(A_dir, exist_ok=True)
 
     # File path for this label and norm
     A_path = os.path.join(A_dir, f"norm_{req.norm}_label_{label}.pt")
-    print(A_path)
 
     if not os.path.exists(A_path):
         # Compute and save
@@ -66,22 +58,9 @@ def compress_MFC_per_label(label: str,
         A = torch.load(A_path)
         print(f"Matrix A loaded from {A_path}")
 
-
-
-    #norm_float = globals.NORM_MAP[req.norm]
-    #mfc_model = MFC(data_tensor, norm=norm_float)
-    
-    # Cancel before heavy operation
-    # if cancel_callback():
-    #     return None, None
-
     compressed_subset, final_eta, sol, t_total = mfc_model.gen_data(A, eta=req.eta, k=req.k, solver=req.optimizer)
     final_eta = float(final_eta)
 
-    # Cancel after heavy operation
-    # if cancel_callback():
-    #     return None, None
-    
     # satellite nodes images tensor
     center_idx_lst = (torch.nonzero(torch.tensor(sol)).reshape(-1)).tolist()
 
@@ -128,71 +107,6 @@ def compress_MFC_per_label(label: str,
 
 
 
-# def worker_process(req: CompressRequest, 
-#                     start_time:float,
-#                     progress_queue: multiprocessing.Queue, 
-#                     cancel_event: multiprocessing.Event 
-#                     ):
-
-#     compressed_data_by_label = {}
-#     progress_queue.put({"start": True})
-#     labels = load_dataset_classes()[req.dataset_name]
-#     total = len(labels)
-
-#     for i, label in enumerate(labels):
-       
-#         if cancel_event.is_set():
-#             progress_queue.put({"cancelled": True, "label": label})
-#             return
-       
-#         compressed_subset = compress_MFC_per_label(
-#                                     label, 
-#                                     req, 
-#                                     cancel_callback = cancel_event.is_set)
-#         if compressed_subset is None:
-#             progress_queue.put({"cancelled": True})
-#             return
-
-#         compressed_data_by_label[label] = compressed_subset
-
-#         progress_queue.put({
-#             "progress": i,
-#             "total": total,
-#             "label": label
-#         })
-
-#     summary = CompressionSummary(
-#             compression_id = req.compression_job_id,
-#             dataset_name = req.dataset_name,
-#             timestamp = datetime.now(),
-#             norm = req.norm,
-#             k = req.k,
-#             elapsed_seconds = int(time.time() - start_time),
-#             labels = labels,
-#         )
-    
-#     offsets_by_label = {key: 0 for key in labels}
-    
-    
-#     save_path = f"{globals.TMP_DATA_OF_COMPRESSION_DIR}/{req.compression_job_id}_compressed.pt"
-
-#     torch.save({
-#                 "compression_id": req.compression_job_id,
-#                 "compressed_data_by_label": compressed_data_by_label,
-#                 "summary": summary.model_dump(),  # instead of summary.dict()
-#                 "offsets_by_label": offsets_by_label,
-#                 }, save_path)
-
-
-#     progress_queue.put({"done": True})
-    
-#     try:
-#         progress_queue.close()
-#     except:
-#         pass
-
-
-
 
 def to_numpy_matrix(A):
     """Convert A to a 2D numpy array. Accepts torch.Tensor or numpy array."""
@@ -235,5 +149,4 @@ def select_indices(matrix, k, threshold, num_samples):
         step = int(math.floor(len(sorted_indices) / num_samples ))
         selected_indices = [sorted_indices[1 + int(i * step)] for i in range(num_samples)]
 
-    # Return as Python ints
     return [int(idx) for idx in selected_indices]

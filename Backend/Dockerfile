@@ -14,8 +14,11 @@ COPY requirements.txt .
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+    
 # ======================
 # Copy your code
 # ======================
@@ -24,9 +27,16 @@ COPY . .
 # ======================
 # Environment setup
 # ======================
+# Ensures logs are flushed immediately
 ENV PYTHONUNBUFFERED=1
-ENV MKL_NUM_THREADS=1
+
+# Limit threading to avoid CPU oversubscription (especially with PyTorch)
 ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+
+ENV NUMEXPR_NUM_THREADS=1
+ENV OPENBLAS_NUM_THREADS=1
+
 
 # Expose FastAPI port
 EXPOSE 8000

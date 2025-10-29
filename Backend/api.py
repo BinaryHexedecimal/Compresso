@@ -10,8 +10,11 @@ import time
 import shutil
 import os
 import zipfile
-import torch
 from datetime import datetime
+import torch.multiprocessing as mp
+import gurobipy as gp
+import torch
+from torch.utils.data import TensorDataset, DataLoader
 
 
 
@@ -23,6 +26,7 @@ from util_compression import *
 from util_data import *
 from util_image import *
 from util_train import *
+from src import *
 
 
 
@@ -37,12 +41,10 @@ ACTIVE_JOBS = {
 active_compressed_data_obj = None
 
 
-
 # Device and model setup (once) 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# Global PyTorch thread configuration
 torch.set_num_threads(globals.NUM_CPU // 2)  #floor division, For CPU-heavy ops
-#torch.set_num_interop_threads(2) # For cross-op scheduling
+
 
 # ------------------ Unified lifespan ------------------
 
@@ -112,8 +114,14 @@ async def lifespan(app: FastAPI):
     yield
 
     # --- Shutdown phase ---
-    print("Cleaning up worker processes...")
-    # blabla
+
+    # clean up semaphores and shared memory
+    mp.active_children()  # Lists active processes
+    for p in mp.active_children():
+        print("one zombie...")
+        p.terminate()
+        p.join()
+
     print("Cleanup finished. Server shutdown complete.")
 
 
@@ -130,6 +138,18 @@ app.add_middleware(
 
 
 # ------------------ Compression  ------------------ #
+@app.get("/gurobi-status")
+def gurobi_status():
+    try:
+        print("Checking Gurobi license...")
+        env = gp.Env(empty=True)
+        env.start()  # this triggers license check
+        print("✅ Gurobi environment initialized successfully")
+        return {"gurobi_valid": True}
+    except gp.GurobiError as e:
+        print(f"❌ Gurobi license check failed: {e}")
+        return {"gurobi_valid": False} 
+
 
 @app.post("/compress")
 async def compress(req: CompressRequest):
@@ -153,7 +173,6 @@ async def compress(req: CompressRequest):
             await asyncio.sleep(0.3)
 
             if ACTIVE_JOBS["compression"][job_id]["cancel"]:
-                #yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
                 break
 
             compressed_subset = compress_MFC_per_label(label, req)
@@ -208,7 +227,6 @@ async def stream_training(req: BaseTrainRequest):
     ACTIVE_JOBS["training"][req.train_job_id] = {"cancel": False}
 
     async def event_stream():
-        # Notify start
         req_ = req.model_dump()
         kind = req_.get("kind", "").lower()
         if kind == "standard":
@@ -220,7 +238,7 @@ async def stream_training(req: BaseTrainRequest):
         res = torch.load(training_data_path, weights_only=False)
         train_dataset = TensorDataset(res["train_x"], res["train_y"])
         test_dataset = load_dataset(req_obj.data_info.get('dataset_name'), train_ = False)
-        #train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+
         train_loader = DataLoader(
                                 train_dataset,
                                 batch_size=64,
@@ -230,8 +248,7 @@ async def stream_training(req: BaseTrainRequest):
                                 persistent_workers=True,
                                 prefetch_factor=4
                             )
-        #test_loader  = DataLoader(test_dataset, batch_size=64, shuffle=False)
-        
+
         test_loader = DataLoader(
                                 test_dataset,
                                 batch_size=64,
@@ -246,6 +263,9 @@ async def stream_training(req: BaseTrainRequest):
         _num_classes = len(load_dataset_classes()[req_obj.data_info["dataset_name"]])
         print(f"The training data has channael {_in_channels} and num of class {_num_classes}")
         model = ConvNet(in_channels=_in_channels, num_classes=_num_classes)
+        
+        model.to(device)
+
         trainer = TR(model, train_loader, test_loader, eps_linf=globals.EPS_LINF, eps_l2=globals.EPS_L2)
         
         # Select optimizer
@@ -263,16 +283,27 @@ async def stream_training(req: BaseTrainRequest):
         for epoch in range(1, req_obj.num_iterations+1):
             await asyncio.sleep(0.2)
             if ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:
-                #yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
                 break
 
             model_save_path = globals.TMP_TRAIN_CHECKPOINT_DIR / f"{req_obj.train_job_id}_epoch_{epoch}.pt"
             if req_obj.kind == "standard":                
                 train_acc, train_loss = trainer.epoch(train_loader, weight=False, opt=opt)
                 test_acc, test_loss = trainer.epoch(test_loader)
+                #_epsilon = (trainer.eps_linf[0] if isinstance(trainer.eps_linf, (list, tuple)) else trainer.eps_linf)
+                if isinstance(trainer.eps_linf, (list, tuple)):
+                    _epsilon = trainer.eps_linf[0]
+                elif torch.is_tensor(trainer.eps_linf):
+                    _epsilon = trainer.eps_linf.item()
+                else:
+                    _epsilon = trainer.eps_linf
 
                 if (req_obj.num_iterations == epoch) and req_obj.require_adv_attack_test:   
-                    linf_adv_acc, linf_adv_loss = trainer.epoch_adv(test_loader, trainer.pgd_linf, weight=False, epsilon=trainer.eps_linf)
+                    linf_adv_acc, linf_adv_loss = trainer.epoch_adv(test_loader, 
+                                                                    trainer.pgd_linf, 
+                                                                    weight=False, 
+                                                                    #epsilon=trainer.eps_linf,
+                                                                    epsilon=float(_epsilon))
+
                     #l2_adv_acc, l2_adv_loss = trainer.epoch_adv(test_loader, trainer.pgd_l2, weight=False, epsilon=trainer.eps_l2)
                 else:
                     linf_adv_acc, linf_adv_loss = -1, -1
@@ -283,11 +314,29 @@ async def stream_training(req: BaseTrainRequest):
 
             elif req_obj.kind == "adversarial":
                 attack = trainer.pgd_linf if req_obj.attack == "PGD-linf" else trainer.pgd_l2
-                train_acc, train_loss = trainer.epoch_adv(train_loader, attack=attack, weight=False, opt=opt, epsilon=req_obj.epsilon, alpha = req_obj.alpha  )
+                train_acc, train_loss = trainer.epoch_adv(train_loader, 
+                                                          attack=attack, 
+                                                          weight=False, 
+                                                          opt=opt, 
+                                                          epsilon=req_obj.epsilon, 
+                                                          alpha = req_obj.alpha  )
                 test_acc, test_loss = trainer.epoch(test_loader)
+                # _epsilon = (trainer.eps_linf[0] if isinstance(trainer.eps_linf, (list, tuple)) else trainer.eps_linf)
+                if isinstance(trainer.eps_linf, (list, tuple)):
+                    _epsilon = trainer.eps_linf[0]
+                elif torch.is_tensor(trainer.eps_linf):
+                    _epsilon = trainer.eps_linf.item()
+                else:
+                    _epsilon = trainer.eps_linf
+
 
                 if (req_obj.num_iterations == epoch) and req_obj.require_adv_attack_test:  
-                    linf_adv_acc, linf_adv_loss = trainer.epoch_adv(test_loader, trainer.pgd_linf, weight=False, epsilon=trainer.eps_linf)
+                    linf_adv_acc, linf_adv_loss = trainer.epoch_adv(test_loader, 
+                                                                    trainer.pgd_linf, 
+                                                                    weight=False, 
+                                                                   #epsilon=trainer.eps_linf,
+                                                                    epsilon=float(_epsilon)
+                    )
 
                 else:
                     linf_adv_acc, linf_adv_loss = -1, -1
@@ -438,7 +487,6 @@ def get_graph_json(compression_job_id: str, label: str, k: int):
 @app.get("/get_node_image/{compression_job_id}/{label}/{node_index}")
 def get_node_image(compression_job_id: str, label: str, node_index: int):
     read_path = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{compression_job_id}_nodes.pt"
-    #nodes =torch.load(read_path, map_location="cpu", weights_only=False)
     nodes =torch.load(read_path,  weights_only=False)
     image_tensor = nodes[node_index]
     img_bytes = tensor_to_image_bytes(image_tensor)
@@ -516,27 +564,6 @@ def get_all_summaries_from_container():
         except Exception as e:
             print(f"Failed to load {file}: {e}")
     return summaries
-
-
-# @app.get("/summary_from_container/{compression_job_id}", response_model=CompressionSummary)
-# def get_one_summary_from_container(compression_job_id: str):
-#     folder = globals.COMPRESSION_CONTAINER_DIR
-#     if not folder.exists() or not folder.is_dir():
-#         raise HTTPException(status_code=404, detail="User container folder not found")
-
-#     expected_filename = f"{compression_job_id}_summary.json"
-#     summary_path = folder / expected_filename
-
-#     if not summary_path.exists():
-#         raise HTTPException(status_code=404, detail=f"Summary for dataId '{compression_job_id}' not found")
-
-#     try:
-#         with open(summary_path, "r") as f:
-#             data = json.load(f)
-#             return CompressionSummary(**data)
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"Failed to load summary: {e}")
-
 
 
 
@@ -1048,25 +1075,10 @@ def download_model(model_id: str, display_name: str | None = Query(default=None)
     return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
 
 
-@app.post("/evaluate_model")
-def evaluate_model(req: EvaluationRequest):
-    model_path = globals.PERMANENT_TRAIN_MODELS_DIR / f"{req.model_id}.pt"
-
-    if not model_path.exists():
-        raise HTTPException(status_code=404, detail=f"Model not found: {model_path}")
-
-    try:
-        acc = evaluate(req, model_path)
-        return {"accuracy": acc}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Evaluation failed: {e}")
-
-
-
 
 
 # ------------------ Local run (for development) ------------------ #
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=True)
+    #uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=False)

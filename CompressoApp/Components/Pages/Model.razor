@@ -25,7 +25,6 @@ else
                     </button>
                 </th>
                 <th></th>
-                <th></th>
                 <th>Accuracy</th>
             </tr>
         </thead>
@@ -62,8 +61,8 @@ else
                             </button>
                         </td>
 
-                        <td>
-                            <td>
+
+                            @* <td>
                                 @if (evaluatingModelId == modelInfo.ModelId)
                                 {
                                     <button class="btn btn-secondary" disabled style="width:130px">
@@ -79,12 +78,12 @@ else
                                         Evaluate
                                     </button>
                                 }
-                            </td>
-                        </td>
+                            </td> *@
+
                         <td>@{
-                                if (acc.TryGetValue(modelInfo.ModelId, out var value))
+                                if (modelInfo.TestAcc!= -1)
                                 {
-                                    <td>@value.ToString("F4")</td>
+                                    <td>@modelInfo.TestAcc.ToString("F4")</td>
                                 }
                                 else
                                 {

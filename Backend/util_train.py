@@ -1,12 +1,11 @@
-import torch
-from torch.utils.data import DataLoader
+#import torch
+#from torch.utils.data import DataLoader
+#import globals
+#from util_data import load_dataset
+#from util_data import load_dataset_classes
+#from src import MFC, TR
 import torch.nn as nn
 import torch.nn.functional as F
-
-import globals
-from util_data import load_dataset
-from util_data import load_dataset_classes
-from src import MFC, TR
 
 
 # -----------------------------
@@ -36,46 +35,3 @@ class ConvNet(nn.Module):
         return x
 
 
-
-
-def evaluate(req, model_path):
-    # 1️⃣ Load dataset
-    dataset = load_dataset(req.dataset_name, train_=req.train_)
-    #loader = DataLoader(dataset, batch_size=64, shuffle=False)
-    loader = DataLoader(
-                        dataset,
-                        batch_size=64,
-                        shuffle=True,
-                        num_workers=min(8, globals.NUM_CPU // 2),
-                        pin_memory=True,
-                        persistent_workers=True,
-                        prefetch_factor=4
-                    )
-    # 2️⃣ Create model & load weights
-    sample, _ = dataset[0]
-    in_channels = sample.shape[0]
-    num_classes = len(load_dataset_classes()[req.dataset_name])
-
-    model = ConvNet(in_channels=in_channels, num_classes=num_classes)
-
-    model.load_state_dict(torch.load(model_path, map_location="cpu"))
-    model.eval()
-
-    # 3️⃣ Evaluate
-    criterion = nn.CrossEntropyLoss()
-    total_loss, correct, total = 0.0, 0, 0
-
-    with torch.no_grad():
-        for x, y in loader:
-            outputs = model(x)
-            loss = criterion(outputs, y)
-            total_loss += loss.item() * x.size(0)
-            preds = torch.argmax(outputs, dim=1)
-            correct += (preds == y).sum().item()
-            total += y.size(0)
-
-    avg_loss = total_loss / total
-    acc = correct / total
-
-    print(f"[Evaluation] {req.dataset_name} | Acc: {acc:.4f}, Loss: {avg_loss:.4f}")
-    return acc

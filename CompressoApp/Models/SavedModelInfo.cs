@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization;
-using System.Text.Json;
+
 
 namespace CompressoApp.Models;
 
@@ -14,5 +14,7 @@ public class SavedModelInfo
     public int K { get; set; } = -1;
     [JsonPropertyName("kind")]
     public string Kind { get; set; } = "standard";
+    [JsonPropertyName("test_acc")]
+    public double TestAcc { get; set; } = -1;
 
 }
