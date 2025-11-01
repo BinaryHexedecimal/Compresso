@@ -48,7 +48,7 @@ public partial class TrainHistory : ComponentBase
     {
         bool confirm = await JS.InvokeAsync<bool>(
             "confirm",
-            new object[] { "⚠️ This will delete ALL history permanently. Are you sure?" }
+            new object[] { "This will delete ALL history permanently. Are you sure?" }
         );
 
         if (!confirm)

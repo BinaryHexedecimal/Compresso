@@ -5,6 +5,14 @@ import os, glob
 from PIL import Image
 from torchvision import datasets, transforms
 import torch
+from pathlib import Path
+import shutil
+import zipfile
+from typing import List, Dict, Tuple
+from fastapi import HTTPException
+
+
+
 
 
 from models import OriginDatasetPerLabel
@@ -28,7 +36,7 @@ def save_dataset_classes(dataset_classes: dict):
 def register_dataset_classes(dataset_name: str, class_names: list):
     data = load_dataset_classes()
     if dataset_name in data:
-        print(f"Dataset '{dataset_name}' already registered, skipping.")
+        print(f"Dataset class '{dataset_name}' already registered, skipping.")
     else:
         data[dataset_name] = class_names
         save_dataset_classes(data)
@@ -50,7 +58,7 @@ def save_dataset_names(active_datasets: list):
 def register_dataset_names(dataset_name: str):
     data = load_dataset_names()
     if dataset_name in data: # and data[dataset_name] == class_names:
-        print(f"Dataset '{dataset_name}' already registered, skipping.")
+        print(f"Dataset name'{dataset_name}' already registered, skipping.")
     else:
         data.append(dataset_name)
         save_dataset_names(data)
@@ -224,49 +232,162 @@ def create_train_data_obj(dataset_name: str, percent: int) :
 
 
 
-def save_trainable_data_in_container(
-    compressed_dict: dict,
-    compression_job_id: str,
-    dataset_name: str):
-    all_x = []
-    all_y = []
-
-    class_names = load_dataset_classes()[dataset_name]
-    label_to_index = {label: idx for idx, label in enumerate(class_names)}
-
-    for label_str, subset in compressed_dict.items():
-        all_x.append(subset)
-        all_y.append(torch.full((subset.shape[0],), label_to_index[label_str], dtype=torch.long))
-
-    train_x = torch.cat(all_x, dim=0)
-    train_y = torch.cat(all_y, dim=0)
-
-    save_path = globals.COMPRESSION_CONTAINER_DIR / f"{compression_job_id}_compressed_data.pt"
-    torch.save({
-        "train_x": train_x,
-        "train_y": train_y,
-        "dataset_name": dataset_name
-    }, save_path)
 
 
 
-def prepare_trainable_data(compressed_dict: dict, dataset_name: str):
-    all_x = []
-    all_y = []
+# def prepare_trainable_data(compressed_dict: dict, dataset_name: str):
+#     all_x = []
+#     all_y = []
 
-    class_names = load_dataset_classes()[dataset_name]
-    label_to_index = {label: idx for idx, label in enumerate(class_names)}
+#     class_names = load_dataset_classes()[dataset_name]
+#     label_to_index = {label: idx for idx, label in enumerate(class_names)}
 
-    for label_str, subset in compressed_dict.items():
-        all_x.append(subset)
-        all_y.append(torch.full((subset.shape[0],), label_to_index[label_str], dtype=torch.long))
+#     for label_str, subset in compressed_dict.items():
+#         all_x.append(subset)
+#         all_y.append(torch.full((subset.shape[0],), label_to_index[label_str], dtype=torch.long))
 
-    train_x = torch.cat(all_x, dim=0)
-    train_y = torch.cat(all_y, dim=0)
+#     train_x = torch.cat(all_x, dim=0)
+#     train_y = torch.cat(all_y, dim=0)
 
-    res = {
-        "train_x": train_x,
-        "train_y": train_y,
-        "dataset_name": dataset_name
+#     res = {
+#         "train_x": train_x,
+#         "train_y": train_y,
+#         "dataset_name": dataset_name
+#     }
+#     return res
+
+
+
+
+# util_dataset.py
+
+
+
+# ------------------------
+# Dataset Listing
+# ------------------------
+# def get_dataset_names(root_dir: Path) -> List[str]:
+#     """
+#     Return all available dataset names detected in a given root directory.
+#     """
+#     if not root_dir.exists():
+#         return []
+
+#     return [d.name for d in root_dir.iterdir() if d.is_dir()]
+
+
+# def get_available_labels(load_dataset_classes_fn) -> Dict:
+#     """
+#     Wraps the existing `load_dataset_classes()` for consistency.
+#     """
+#     return load_dataset_classes_fn()
+
+
+# ------------------------
+# Dataset Deletion
+# ------------------------
+def delete_dataset_files(dataset_name: str) -> Tuple[int, List[str]]:
+    """
+    Delete all folder locations corresponding to a user dataset.
+
+    Returns:
+        success_count: number of folders successfully deleted
+        failure_paths: list of paths where deletion failed
+    """
+    paths_to_delete = [
+        globals.DATA_PER_LABEL_DIR / f"{dataset_name}_percent_{globals.USER_DATASET_PERCENT}",
+        globals.RAW_DATA_DIR / dataset_name,
+        globals.ADJ_MATRIX_DIR / f"{dataset_name}_percent_{globals.USER_DATASET_PERCENT}"
+    ]
+
+    success_count = 0
+    failure_paths = []
+
+    for path in paths_to_delete:
+        if path.exists():
+            try:
+                shutil.rmtree(path)
+                success_count += 1
+            except Exception:
+                failure_paths.append(str(path))
+
+    return success_count, failure_paths
+
+
+# ------------------------
+# Upload and Extraction
+# ------------------------
+def validate_zip_upload(filename: str):
+    """
+    Ensure that user-uploaded file is a ZIP file.
+    """
+    if not filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Only .zip files are supported.")
+
+
+def save_temp_upload(file, tmp_dir: Path = Path("/tmp")) -> Path:
+    """
+    Save uploaded file temporarily. Returns full temp file path.
+    """
+    temp_path = tmp_dir / file.filename
+    with open(temp_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    return temp_path
+
+
+def extract_zip_to_dataset_folder(temp_zip_path: Path, dataset_name: str) -> Path:
+    """
+    Unzip uploaded dataseet to the RAW_DATA_DIR.
+    Returns absolute path to the extracted dataset folder.
+    """
+    dataset_folder = globals.RAW_DATA_DIR / dataset_name
+    if dataset_folder.exists():
+        shutil.rmtree(dataset_folder)  # Replace existing version
+
+    with zipfile.ZipFile(temp_zip_path, "r") as zip_ref:
+        zip_ref.extractall(dataset_folder)
+
+    return dataset_folder
+
+
+# ------------------------
+# Dataset Preprocessing
+# ------------------------
+# def preprocess_dataset(dataset_name: str, percent: int = 100):
+#     """
+#     Preprocesses raw uploaded dataset and creates DataPerLabelFolder structure.
+#     """
+#     create_train_data_obj(dataset_name, percent)
+
+
+# ----------------------
+# Full Upload Handler
+# ----------------------
+async def handle_user_dataset_upload(file) -> Dict[str, str]:
+    """
+    High-level handler for user dataset upload and initialization.
+    """
+    # Step 1: Validate and Save ZIP Temporarily
+    validate_zip_upload(file.filename)
+    temp_path = save_temp_upload(file)
+    print(f"Received ZIP file: {temp_path}")
+
+    # Step 2: Extract ZIP
+    dataset_name = Path(file.filename).stem
+    try:
+        extracted_folder = extract_zip_to_dataset_folder(temp_path, dataset_name)
+        print(f"Extracted dataset to: {extracted_folder}")
+    finally:
+        # Cleanup temp file
+        if temp_path.exists():
+            os.remove(temp_path)
+            print(f"Removed temp file: {temp_path}")
+
+    # Step 3: Preprocess for Train/Compression Usage
+    #preprocess_dataset(dataset_name)
+    create_train_data_obj(dataset_name, percent=100)
+
+    return {
+        "status": "success",
+        "message": f"Dataset '{dataset_name}' uploaded and preprocessed successfully"
     }
-    return res

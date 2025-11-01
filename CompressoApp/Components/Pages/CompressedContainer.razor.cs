@@ -18,6 +18,7 @@ public partial class CompressedContainer : ComponentBase
     protected override async Task OnInitializedAsync()
     {
         summaries = await Api.LoadAllSummariesFromContainerAsync();
+        
         backendUrls = Services.GetRequiredService<BackendUrls>();
         backendUrl = backendUrls.External;
     }
@@ -53,7 +54,7 @@ public partial class CompressedContainer : ComponentBase
         summaries = await Api.LoadAllSummariesFromContainerAsync();
         await InvokeAsync(StateHasChanged);
 
-        Console.WriteLine(result);
+        //Console.WriteLine(result);
     }
 
 

@@ -56,7 +56,7 @@ public partial class Model: ComponentBase
     {
         bool confirm = await JS.InvokeAsync<bool>(
             "confirm",
-            new object[] { "⚠️ This will delete ALL saved models permanently. Are you sure?" }
+            new object[] { "This will delete ALL saved models permanently. Are you sure?" }
         );
         if (!confirm)
             return;

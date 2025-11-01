@@ -4,17 +4,19 @@ import plotly.io as pio
 from fastapi.middleware.cors import CORSMiddleware
 import json
 from contextlib import asynccontextmanager
-import asyncio
+#import asyncio
 #import pickle
-import time
-import shutil
-import os
-import zipfile
-from datetime import datetime
+#import time
+#from torch.utils.data import TensorDataset, DataLoader
+#from datetime import datetime
+#import zipfile
+
 import torch.multiprocessing as mp
 import gurobipy as gp
 import torch
-from torch.utils.data import TensorDataset, DataLoader
+import shutil
+import os
+
 
 
 
@@ -23,10 +25,11 @@ import globals
 from models import *
 from util_train import *
 from util_compression import *
-from util_data import *
+from util_dataset import *
 from util_image import *
 from util_train import *
 from src import *
+from util_container import *
 
 
 
@@ -38,12 +41,12 @@ globals.ACTIVE_JOBS = {
     "training": {}
 }
 
-active_compressed_data_obj = None
+globals.ACTIVE_COMPRESSED_DATA_OBJ  = None
 
 
 # Device and model setup (once) 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-torch.set_num_threads(globals.NUM_CPU // 2)  #floor division, For CPU-heavy ops
+#device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#torch.set_num_threads(globals.NUM_CPU // 2)  #floor division, For CPU-heavy ops
 
 
 # ------------------ Unified lifespan ------------------
@@ -152,71 +155,34 @@ def gurobi_status():
         return {"gurobi_valid": False} 
 
 
+
+
+
 @app.post("/compress")
 def compress(req: CompressRequest):
-    start_time = time.time()
     job_id = req.compression_job_id
-    globals.ACTIVE_JOBS["compression"][job_id] = {"cancel": False}
     labels = load_dataset_classes()[req.dataset_name]
+
+    # Track job state
+    globals.ACTIVE_JOBS["compression"][job_id] = {"cancel": False}
+
     async def event_stream():
-        # Notify start
-        yield f"data: {json.dumps({'type': 'start'})}\n\n"
-        yield f"data: {json.dumps({'total': len(labels)})}\n\n"
-        
-        compressed_data_by_label = {}
-        G_by_label = {} 
-        nodes_tensor_by_label = {}
+        yield f"data: {json.dumps({'type': 'start', 'total': len(labels)})}\n\n"
 
-        for i, label in enumerate(labels):
+        # Kick off the job from util_compress
+        async for update in run_compression_job(req, labels):
+            if update is None:  # cancellation
+                break
+            yield f"data: {json.dumps(update)}\n\n"
 
-            # have a rest/pause
-            # let FastAPI handle any cancel possible requests
-            # mega vigtigt!
-            await asyncio.sleep(0.3)
-
-            if globals.ACTIVE_JOBS["compression"][job_id]["cancel"]:
+            if update.get("type") == "done":
                 break
 
-            compressed_subset, G, nodes_tensor = await compress_MFC_per_label(label, req)
 
-            if globals.ACTIVE_JOBS["compression"][job_id]["cancel"]:
-                break
-            compressed_data_by_label[label] = compressed_subset
-            G_by_label[label] = G
-            nodes_tensor_by_label[label] = nodes_tensor
-
-            yield f"data: {json.dumps({'progress': i})}\n\n"
-
-        if globals.ACTIVE_JOBS["compression"][job_id]["cancel"]:
-            yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
-        else:
-            summary = CompressionSummary(
-                compression_id=req.compression_job_id,
-                dataset_name=req.dataset_name,
-                timestamp=datetime.now(),
-                norm=req.norm,
-                k=req.k,
-                elapsed_seconds=int(time.time() - start_time),
-                labels=labels,
-            )
-
-            offsets_by_label = {key: 0 for key in labels}
-
-            global active_compressed_data_obj
-            active_compressed_data_obj = CompressedDatasetObj(
-                compression_id=req.compression_job_id,
-                compressed_data_by_label=compressed_data_by_label,
-                G_by_label= G_by_label,
-                nodes_tensor_by_label= nodes_tensor_by_label,
-                summary=summary,
-                offsets_by_label=offsets_by_label,
-            )
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
+        # Clean up
         globals.ACTIVE_JOBS["compression"].pop(job_id, None)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
-
 
 
 @app.delete("/cancel_compression/{compression_job_id}")
@@ -233,182 +199,23 @@ def cancel_compression(compression_job_id: str):
 # ------------------ Train  ------------------- #
 @app.post("/train")
 async def stream_training(req: BaseTrainRequest):
-
     globals.ACTIVE_JOBS["training"][req.train_job_id] = {"cancel": False}
 
     async def event_stream():
-        req_ = req.model_dump()
-        kind = req_.get("kind", "").lower()
-        if kind == "standard":
-            req_obj = StandardTrainRequest(**req_)
-        else:
-            req_obj = AdvTrainRequest(**req_)
-
-        training_data_path = globals.COMPRESSION_CONTAINER_DIR / f"{req_obj.data_info.get('data_id')}_compressed_data.pt"
-        res = torch.load(training_data_path, weights_only=False)
-        train_dataset = TensorDataset(res["train_x"], res["train_y"])
-        test_dataset = load_dataset(req_obj.data_info.get('dataset_name'), train_ = False)
-
-        train_loader = DataLoader(
-                                train_dataset,
-                                batch_size=64,
-                                shuffle=True,
-                                num_workers=min(8, globals.NUM_CPU // 2),
-                                pin_memory=True,
-                                persistent_workers=True,
-                                prefetch_factor=4
-                            )
-
-        test_loader = DataLoader(
-                                test_dataset,
-                                batch_size=64,
-                                shuffle=True,
-                                num_workers=min(8, globals.NUM_CPU // 2),
-                                pin_memory=True,
-                                persistent_workers=True,
-                                prefetch_factor=4
-                            )
-        sample, _ = train_dataset[0]
-        _in_channels = sample.shape[0] 
-        _num_classes = len(load_dataset_classes()[req_obj.data_info["dataset_name"]])
-        print(f"The training data has channael {_in_channels} and num of class {_num_classes}")
-        model = ConvNet(in_channels=_in_channels, num_classes=_num_classes)
+        # Instantiate request object
+        req_obj = StandardTrainRequest(**req.model_dump()) \
+                  if req.kind == "standard" else AdvTrainRequest(**req.model_dump())
         
-        model.to(device)
-
-        trainer = TR(model, train_loader, test_loader, eps_linf=globals.EPS_LINF, eps_l2=globals.EPS_L2)
-        
-        # Select optimizer
-        if req_obj.optimizer.lower() == "sgd":
-            opt = torch.optim.SGD(model.parameters(), lr=req_obj.learning_rate, momentum=0.9, weight_decay=5e-4)
-        elif req_obj.optimizer.lower() == "adam":
-            opt = torch.optim.Adam(model.parameters(), lr=req_obj.learning_rate, weight_decay=5e-4)
-        else:
-            raise ValueError(f"Unknown optimizer: {req_obj.optimizer}")
-
-
-        all_epochs = []
-
-        yield f"data: {json.dumps({'type': 'start'})}\n\n"
-        for epoch in range(1, req_obj.num_iterations+1):
-            await asyncio.sleep(0.2)
-            if globals.ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:
+        # Kick off the training async generator
+        async for update in run_training_job(req_obj):
+            yield f"data: {json.dumps(update)}\n\n"
+            if update.get("type") in ["done", "cancelled"]:
                 break
 
-            model_save_path = globals.TMP_TRAIN_CHECKPOINT_DIR / f"{req_obj.train_job_id}_epoch_{epoch}.pt"
-            if req_obj.kind == "standard":                
-                train_acc, train_loss = trainer.epoch(train_loader, weight=False, opt=opt)
-                test_acc, test_loss = trainer.epoch(test_loader)
-                #_epsilon = (trainer.eps_linf[0] if isinstance(trainer.eps_linf, (list, tuple)) else trainer.eps_linf)
-                if isinstance(trainer.eps_linf, (list, tuple)):
-                    _epsilon = trainer.eps_linf[0]
-                elif torch.is_tensor(trainer.eps_linf):
-                    _epsilon = trainer.eps_linf.item()
-                else:
-                    _epsilon = trainer.eps_linf
-
-                if (req_obj.num_iterations == epoch) and req_obj.require_adv_attack_test:   
-                    linf_adv_acc, linf_adv_loss = trainer.epoch_adv(test_loader, 
-                                                                    trainer.pgd_linf, 
-                                                                    weight=False, 
-                                                                    #epsilon=trainer.eps_linf,
-                                                                    epsilon=float(_epsilon))
-
-                    #l2_adv_acc, l2_adv_loss = trainer.epoch_adv(test_loader, trainer.pgd_l2, weight=False, epsilon=trainer.eps_l2)
-                else:
-                    linf_adv_acc, linf_adv_loss = -1, -1
-                    #l2_adv_acc, l2_adv_loss = -1, -1
-
-                torch.save(model.state_dict(), model_save_path)
-                print(f"Saved temporary checkpoint: {model_save_path}")    
-
-            elif req_obj.kind == "adversarial":
-                attack = trainer.pgd_linf if req_obj.attack == "PGD-linf" else trainer.pgd_l2
-                train_acc, train_loss = trainer.epoch_adv(train_loader, 
-                                                          attack=attack, 
-                                                          weight=False, 
-                                                          opt=opt, 
-                                                          epsilon=req_obj.epsilon, 
-                                                          alpha = req_obj.alpha  )
-                test_acc, test_loss = trainer.epoch(test_loader)
-                # _epsilon = (trainer.eps_linf[0] if isinstance(trainer.eps_linf, (list, tuple)) else trainer.eps_linf)
-                if isinstance(trainer.eps_linf, (list, tuple)):
-                    _epsilon = trainer.eps_linf[0]
-                elif torch.is_tensor(trainer.eps_linf):
-                    _epsilon = trainer.eps_linf.item()
-                else:
-                    _epsilon = trainer.eps_linf
-
-
-                if (req_obj.num_iterations == epoch) and req_obj.require_adv_attack_test:  
-                    linf_adv_acc, linf_adv_loss = trainer.epoch_adv(test_loader, 
-                                                                    trainer.pgd_linf, 
-                                                                    weight=False, 
-                                                                   #epsilon=trainer.eps_linf,
-                                                                    epsilon=float(_epsilon)
-                    )
-
-                else:
-                    linf_adv_acc, linf_adv_loss = -1, -1
-                    #l2_adv_acc, l2_adv_loss = -1, -1
-
-                torch.save(model.state_dict(), model_save_path)
-                print(f"Saved temporary checkpoint: {model_save_path}")    
-
-            else:
-                print("Ops, no such a kind of train")
-            
-            epoch_data = {
-                "type": "epoch",
-                "epoch": epoch,
-                "train_acc": train_acc,
-                "test_acc": test_acc,
-                "linf_adv_acc": linf_adv_acc,
-            }
-
-            all_epochs.append(epoch_data)
-            yield f"data: {json.dumps(epoch_data)}\n\n"
-
-
-        run_info = {"status": "", 
-                    "train_job_id": req_obj.train_job_id,
-                    "timestamp": datetime.now().isoformat(),
-                    "epochs": all_epochs, 
-                    "req_obj": vars(req_obj)}
-        if globals.ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:            
-            run_info["status"]="cancelled"
-        else:
-            run_info["status"]= "done"
-           
-            
-        # save run info in train history file
-        if os.path.exists(globals.TRAINING_HISTORY_PATH):
-            with open(globals.TRAINING_HISTORY_PATH, "r") as f:
-                try:
-                    history = json.load(f)
-                except json.JSONDecodeError:
-                    history = []
-        else:
-            history = []
-        if not isinstance(history, list):
-            history = [history]
-        history.append(run_info)
-        with open(globals.TRAINING_HISTORY_PATH, "w") as f:
-            json.dump(history, f, indent=4)
-        print(f"Saved training result for job {run_info['train_job_id']}")
-
-
-
-        if globals.ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:            
-            yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
-            
-        else:
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
+        # Clean up
         globals.ACTIVE_JOBS["training"].pop(req.train_job_id, None)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
-
 
 
 
@@ -466,21 +273,21 @@ def sample_origin_images(dataset_name: str, label: str, n: int):
 
 @app.get("/sample_compressed_images")
 def sample_compressed_images(compression_job_id:str, label: str, n: int):
-    if (active_compressed_data_obj.compression_id == compression_job_id):
-        dataset_by_label = active_compressed_data_obj.compressed_data_by_label
-        sequential_offsets = active_compressed_data_obj.offsets_by_label
-        labels = active_compressed_data_obj.summary.labels
+    if (globals.ACTIVE_COMPRESSED_DATA_OBJ.compression_id == compression_job_id):
+        dataset_by_label = globals.ACTIVE_COMPRESSED_DATA_OBJ.compressed_data_by_label
+        sequential_offsets = globals.ACTIVE_COMPRESSED_DATA_OBJ.offsets_by_label
+        labels = globals.ACTIVE_COMPRESSED_DATA_OBJ.summary.labels
         if label not in labels:
             raise HTTPException(404, detail=f"Label {label} not found")
         sequential_offset = sequential_offsets[label]
         new_sequential_offset, images = get_images(
                 dataset_by_label[label], n, sequential_offset, random_mode = False)
-        active_compressed_data_obj.offsets_by_label[label] = new_sequential_offset
+        globals.ACTIVE_COMPRESSED_DATA_OBJ.offsets_by_label[label] = new_sequential_offset
         return transform_images_for_frontend(images)
     else:
         raise HTTPException(
             status_code=400, 
-            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{active_compressed_data_obj.compression_id}'."
+            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{globals.ACTIVE_COMPRESSED_DATA_OBJ.compression_id}'."
         )
 
 
@@ -489,8 +296,8 @@ def get_graph_json(compression_job_id: str, label: str, k: int):
     #read_path = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{compression_job_id}.gpickle"
     #with open(read_path, "rb") as f:
     #    G = pickle.load(f)
-    if (active_compressed_data_obj.compression_id == compression_job_id):
-        G = active_compressed_data_obj.G_by_label[label]
+    if (globals.ACTIVE_COMPRESSED_DATA_OBJ.compression_id == compression_job_id):
+        G = globals.ACTIVE_COMPRESSED_DATA_OBJ.G_by_label[label]
         fig = draw_graph(G, c=k)
         fig_json = pio.to_json(fig)  # For frontend rendering
         return JSONResponse(content={"fig_json": fig_json})
@@ -498,7 +305,7 @@ def get_graph_json(compression_job_id: str, label: str, k: int):
     else:
         raise HTTPException(
             status_code=400, 
-            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{active_compressed_data_obj.compression_id}'."
+            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{globals.ACTIVE_COMPRESSED_DATA_OBJ.compression_id}'."
         )
     
 
@@ -506,8 +313,8 @@ def get_graph_json(compression_job_id: str, label: str, k: int):
 @app.get("/get_node_image/{compression_job_id}/{label}/{node_index}")
 def get_node_image(compression_job_id: str, label: str, node_index: int):
     #read_path = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{compression_job_id}_nodes.pt"
-    if (active_compressed_data_obj.compression_id == compression_job_id):
-        nodes = active_compressed_data_obj.nodes_tensor_by_label[label]
+    if (globals.ACTIVE_COMPRESSED_DATA_OBJ.compression_id == compression_job_id):
+        nodes = globals.ACTIVE_COMPRESSED_DATA_OBJ.nodes_tensor_by_label[label]
         #nodes =torch.load(read_path,  weights_only=False)
         image_tensor = nodes[node_index]
         img_bytes = tensor_to_image_bytes(image_tensor)
@@ -515,7 +322,7 @@ def get_node_image(compression_job_id: str, label: str, node_index: int):
     else:
         raise HTTPException(
             status_code=400, 
-            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{active_compressed_data_obj.compression_id}'."
+            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{globals.ACTIVE_COMPRESSED_DATA_OBJ.compression_id}'."
         )
     
 
@@ -566,13 +373,13 @@ def get_node_image(compression_job_id: str, label: str, node_index: int):
 
 @app.get("/fetch_compression_summary_from_memory/{compression_job_id}")
 async def fetch_compression_summary_from_memory(compression_job_id: str):
-    if active_compressed_data_obj.compression_id == compression_job_id:
-        summary = active_compressed_data_obj.summary
+    if globals.ACTIVE_COMPRESSED_DATA_OBJ.compression_id == compression_job_id:
+        summary = globals.ACTIVE_COMPRESSED_DATA_OBJ.summary
         return {"summary": summary, "status": "done"}
     else:
         raise HTTPException(
             status_code=400, 
-            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{active_compressed_data_obj.compression_id}'."
+            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{globals.ACTIVE_COMPRESSED_DATA_OBJ.compression_id}'."
         )
 
 
@@ -655,153 +462,6 @@ def delete_all_container_data():
         )
 
 
-
-
-@app.post("/save/{compression_job_id}")
-def save_in_container(compression_job_id: str):
-    file_dir = globals.COMPRESSION_CONTAINER_DIR
-    if not file_dir.exists():
-        raise HTTPException(status_code=500, detail=f"Container directory {file_dir} does not exist")
-    
-    if compression_job_id != active_compressed_data_obj.compression_id:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{active_compressed_data_obj.compression_id}'."
-        )
-    else:
-        current_summary = active_compressed_data_obj.summary
-        dataset_name = current_summary.dataset_name
-        files = [f for f in os.listdir(file_dir) if f.endswith("_summary.json")]
-        if len(files) >= globals.MAX_FILES_IN_CONTAINER :
-            return JSONResponse(content={
-                "SaveMessage": f"Container full: {len(files)}/{globals.MAX_FILES_IN_CONTAINER} files.",
-                "RequireUserDecision": True
-            })
-        for f in files:
-            with open(os.path.join(file_dir, f), "r") as sf:
-                try:
-                    saved_summary = json.load(sf)
-                except Exception:
-                    continue  # skip corrupted or unreadable summaries
-
-                if (saved_summary.get("dataset_name") == current_summary.dataset_name and
-                    saved_summary.get("k") == current_summary.k and
-                    saved_summary.get("norm") == current_summary.norm):
-                    print("Found duplicate id is " + saved_summary.get("compression_id"))
-                    return JSONResponse(content={
-                        "SaveMessage": (
-                            f"⚠️Duplicate found: Dataset {current_summary.dataset_name}, "
-                            f"k={current_summary.k}, norm={current_summary.norm} already exists."
-                        ),
-                        "RequireUserDecision": True,
-                        "DuplicateId": saved_summary.get("compression_id")
-                    })
-        # no exceed, no duplicate, start saving
-        # Save .pt 
-        save_trainable_data_in_container(
-                                active_compressed_data_obj.compressed_data_by_label, 
-                                compression_job_id,
-                                dataset_name = dataset_name)
-
-        # Save summary
-        with open(os.path.join(file_dir, f"{compression_job_id}_summary.json"), "w") as f:
-            f.write(active_compressed_data_obj.summary.model_dump_json())
-
-        return JSONResponse(content={
-            "SaveMessage": "✅Saved successfully.",
-            "RequireUserDecision": False})
-
-
-@app.post("/handle_replace_choice/{compression_job_id}/{duplicate_id}")
-@app.post("/handle_replace_choice/{compression_job_id}")  
-def handle_replace_choice(compression_job_id: str, duplicate_id: Optional[str] = None):
-    file_dir = globals.COMPRESSION_CONTAINER_DIR
-
-    # --- Basic checks ---
-    if not file_dir.exists():
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "SaveMessage": f"❌Container directory {file_dir} does not exist.",
-                "RequireUserDecision": True
-            }
-        )
-
-    if active_compressed_data_obj.compression_id != compression_job_id:
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content={
-                "SaveMessage": f"❌Compressed data not found for id {compression_job_id}.",
-                "RequireUserDecision": True
-            }
-        )
-
-    try:
-        message_suffix = ""  
-        # --- CASE 1: No duplicate_id → find and delete oldest summary ---
-        if not duplicate_id:
-            print("No duplicate_id provided — searching for oldest summary...")
-            summaries = list(file_dir.glob("*_summary.json"))
-
-            if summaries:
-                oldest_file = min(summaries, key=os.path.getmtime)
-                delete_id = oldest_file.stem.replace("_summary", "")
-                print(f"Oldest summary found and will be replaced: {oldest_file.name}")
-
-                # Delete both summary and data files
-                for suffix in ["_summary.json", "_compressed_data.pt"]:
-                    path = file_dir / f"{delete_id}{suffix}"
-                    if path.exists():
-                        os.remove(path)
-                        print(f"Deleted old file: {path.name}")
-
-                message_suffix = " by replacing the oldest compression."
-            else:
-                print("No summaries found to delete.")
-                message_suffix = "\nℹ️No prior compressions found — nothing replaced."
-
-        # --- CASE 2: duplicate_id provided explicitly ---
-        else:
-            print(f"Replacing specific duplicate: {duplicate_id}")
-            for suffix in ["_summary.json", "_compressed_data.pt"]:
-                path = file_dir / f"{duplicate_id}{suffix}"
-                if path.exists():
-                    os.remove(path)
-                    print(f"Deleted duplicate file: {path.name}")
-
-            message_suffix = " by replacing the old duplicate."
-
-        # --- Save new compressed results ---
-        dataset_name = active_compressed_data_obj.summary.dataset_name
-        save_trainable_data_in_container(active_compressed_data_obj.compressed_data_by_label, 
-                                             compression_job_id,
-                                             dataset_name=dataset_name)
-
-        
-        with open(file_dir / f"{compression_job_id}_summary.json", "w") as f:
-            f.write(active_compressed_data_obj.summary.model_dump_json())
-
-        final_message = f"✅Saved successfully{message_suffix}"
-
-        return JSONResponse(
-            content={
-                "SaveMessage": final_message,
-                "RequireUserDecision": False
-            }
-        )
-
-    except Exception as e:
-        print("Replacement failed:", e)
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "SaveMessage": f"❌Replacement failed: {str(e)}",
-                "RequireUserDecision": False
-            }
-        )
-
-
-
 @app.get("/download_compressed_data/{compressionJobId}")
 def download_compressed_data(compressionJobId: str, display_name: str | None = Query(default=None)):
     
@@ -812,6 +472,68 @@ def download_compressed_data(compressionJobId: str, display_name: str | None = Q
     # sanitize fallback
     filename = display_name if display_name else f"{compressionJobId}.pt"
     return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
+
+
+
+@app.post("/save/{compression_job_id}")
+def save_in_container(compression_job_id: str):
+    file_dir = globals.COMPRESSION_CONTAINER_DIR
+    ensure_dir_exists(file_dir)
+
+    active_obj = globals.ACTIVE_COMPRESSED_DATA_OBJ
+    if compression_job_id != active_obj.compression_id:
+        raise HTTPException(400, f"Invalid compression_job_id: {compression_job_id}")
+
+    summary = active_obj.summary.dict()
+
+    full, num_files = is_container_full(file_dir, globals.MAX_FILES_IN_CONTAINER)
+    if full:
+        return JSONResponse({
+            "SaveMessage": f"Container full ({num_files}/{globals.MAX_FILES_IN_CONTAINER} files).",
+            "RequireUserDecision": True
+        })
+
+    dup_id = find_duplicate_id(file_dir, summary)
+    if dup_id:
+        return JSONResponse({
+            "SaveMessage": "Duplicate found.",
+            "RequireUserDecision": True,
+            "DuplicateId": dup_id
+        })
+
+    save_compression(file_dir, active_obj, compression_job_id)
+    return JSONResponse({"SaveMessage": "Saved successfully.", "RequireUserDecision": False})
+
+
+
+
+@app.post("/handle_replace_choice/{compression_job_id}/{duplicate_id}")
+@app.post("/handle_replace_choice/{compression_job_id}")
+def handle_replace_choice(compression_job_id: str, duplicate_id: Optional[str] = None):
+    file_dir = globals.COMPRESSION_CONTAINER_DIR
+    ensure_dir_exists(file_dir)
+
+    active_obj = globals.ACTIVE_COMPRESSED_DATA_OBJ
+    if active_obj.compression_id != compression_job_id:
+        raise HTTPException(404, f"No active compression with id {compression_job_id}")
+
+    # Remove old or duplicate file
+    if duplicate_id:
+        remove_compression_by_id(file_dir, duplicate_id)
+        action_msg = "Replaced duplicate"
+    else:
+        removed_id = remove_oldest(file_dir)
+        action_msg = f"Replaced oldest ({removed_id})" if removed_id else "No previous files found"
+
+    # Now save new compression
+    save_compression(file_dir, active_obj, compression_job_id)
+
+    return JSONResponse({
+        "SaveMessage": f"Saved successfully. {action_msg}.",
+        "RequireUserDecision": False
+    })
+
+
 
 
 
@@ -831,72 +553,96 @@ def get_all_dataset_labels():
 
 @app.delete("/delete_dataset/{dataset_name}")
 def delete_dataset(dataset_name: str):
-    # --- Delete from active dataset registry
-    # --- But keep it in the class registry, 
-    # --- because the training history, compressed data may still need it
-    success_deregistry = deactive_dataset(dataset_name)
+    success, failures = delete_dataset_files(dataset_name)
 
-    if not success_deregistry:
-        raise HTTPException(status_code=404, detail="No dataset found for given dataset name")
+    if success == 0:
+        raise HTTPException(404, detail=f"No dataset found for '{dataset_name}'")
 
-    paths_to_delete = [os.path.join(globals.DATA_PER_LABEL_DIR, dataset_name + f"_percent_{globals.USER_DATASET_PERCENT}"),
-                        os.path.join(globals.RAW_DATA_DIR, dataset_name),
-                        os.path.join(globals.ADJ_MATRIX_DIR, dataset_name) + f"_percent_{globals.USER_DATASET_PERCENT}"
-                        ]
-    success_delete_data = 0
-    for path_to_delete in paths_to_delete:
-        if os.path.exists(path_to_delete):
-            try:
-                shutil.rmtree(path_to_delete)
-                success_delete_data += 1
-                print(f"Deleted directory: {path_to_delete}")
-            except Exception as e:
-                print(f"Failed to delete {path_to_delete}: {e}")
+    if failures:
+        return {"message": f"Deleted partially: {success} items removed, failed at: {failures}"}
 
-    if success_delete_data == len(paths_to_delete):
-        return {"message": f"✅Deleted '{dataset_name}'" }
-    else:
-        return {"message": f"{dataset_name} cannot be deleted completely, check it" }
+    return {"message": f"Deleted '{dataset_name}' successfully."}
 
 
 @app.post("/upload")
 async def upload_and_preprocess_user_dataset(file: UploadFile = File(...)):
-    """
-    Receive a ZIP dataset file from the frontend, extract it, and store it.
-    """
     try:
-        # Ensure it's a ZIP file
-        if not file.filename.lower().endswith(".zip"):
-            raise HTTPException(status_code=400, detail="Only .zip files are supported.")
-        # Save uploaded file temporarily
-        temp_path = os.path.join("/tmp", file.filename)
-        with open(temp_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        print(f"Received ZIP file: {temp_path}")
-        # Extract dataset name (remove .zip extension)
-        dataset_name = os.path.splitext(file.filename)[0]
-        dataset_folder = os.path.join(globals.RAW_DATA_DIR, dataset_name)
-        # Extract ZIP into the target directory
-        with zipfile.ZipFile(temp_path, "r") as zip_ref:
-            zip_ref.extractall(dataset_folder)
-        # Cleanup the temp file
-        os.remove(temp_path)
-        print(f"Extracted dataset: {dataset_folder}")
-
-    except zipfile.BadZipFile:
-        raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive.")
+        result = await handle_user_dataset_upload(file)
+        return result
+    except HTTPException as exc:
+        raise exc
     except Exception as e:
-        print(f"Upload failed: {e}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
-    try:
-        create_train_data_obj(dataset_name, percent=100)
-        return {
-            "status": "success",
-            "message": f"✅Dataset '{dataset_name}' preprocessed successfully"
-        }
-    except Exception as e:
-        raise HTTPException(500, detail=f"Preprocessing failed: {str(e)}")
+
+# @app.delete("/delete_dataset/{dataset_name}")
+# def delete_dataset(dataset_name: str):
+#     # --- Delete from active dataset registry
+#     # --- But keep it in the class registry, 
+#     # --- because the training history, compressed data may still need it
+#     success_deregistry = deactive_dataset(dataset_name)
+
+#     if not success_deregistry:
+#         raise HTTPException(status_code=404, detail="No dataset found for given dataset name")
+
+#     paths_to_delete = [os.path.join(globals.DATA_PER_LABEL_DIR, dataset_name + f"_percent_{globals.USER_DATASET_PERCENT}"),
+#                         os.path.join(globals.RAW_DATA_DIR, dataset_name),
+#                         os.path.join(globals.ADJ_MATRIX_DIR, dataset_name) + f"_percent_{globals.USER_DATASET_PERCENT}"
+#                         ]
+#     success_delete_data = 0
+#     for path_to_delete in paths_to_delete:
+#         if os.path.exists(path_to_delete):
+#             try:
+#                 shutil.rmtree(path_to_delete)
+#                 success_delete_data += 1
+#                 print(f"Deleted directory: {path_to_delete}")
+#             except Exception as e:
+#                 print(f"Failed to delete {path_to_delete}: {e}")
+
+#     if success_delete_data == len(paths_to_delete):
+#         return {"message": f"Deleted '{dataset_name}'" }
+#     else:
+#         return {"message": f"{dataset_name} cannot be deleted completely, check it" }
+
+
+# @app.post("/upload")
+# async def upload_and_preprocess_user_dataset(file: UploadFile = File(...)):
+#     """
+#     Receive a ZIP dataset file from the frontend, extract it, and store it.
+#     """
+#     try:
+#         # Ensure it's a ZIP file
+#         if not file.filename.lower().endswith(".zip"):
+#             raise HTTPException(status_code=400, detail="Only .zip files are supported.")
+#         # Save uploaded file temporarily
+#         temp_path = os.path.join("/tmp", file.filename)
+#         with open(temp_path, "wb") as buffer:
+#             shutil.copyfileobj(file.file, buffer)
+#         print(f"Received ZIP file: {temp_path}")
+#         # Extract dataset name (remove .zip extension)
+#         dataset_name = os.path.splitext(file.filename)[0]
+#         dataset_folder = os.path.join(globals.RAW_DATA_DIR, dataset_name)
+#         # Extract ZIP into the target directory
+#         with zipfile.ZipFile(temp_path, "r") as zip_ref:
+#             zip_ref.extractall(dataset_folder)
+#         # Cleanup the temp file
+#         os.remove(temp_path)
+#         print(f"Extracted dataset: {dataset_folder}")
+
+#     except zipfile.BadZipFile:
+#         raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive.")
+#     except Exception as e:
+#         print(f"Upload failed: {e}")
+#         raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+
+#     try:
+#         create_train_data_obj(dataset_name, percent=100)
+#         return {
+#             "status": "success",
+#             "message": f"Dataset '{dataset_name}' preprocessed successfully"
+#         }
+#     except Exception as e:
+#         raise HTTPException(500, detail=f"Preprocessing failed: {str(e)}")
 
 
 

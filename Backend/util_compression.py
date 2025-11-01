@@ -1,14 +1,16 @@
 import torch
-from src import MFC
 import numpy as np
 import networkx as nx
 import math
 import asyncio
-#import pickle
+import time, asyncio
+from datetime import datetime
 
 
+
+from src import MFC
 from models import *
-from util_data import *
+from util_dataset import *
 import globals
 
 
@@ -126,6 +128,59 @@ async def compress_MFC_per_label(label: str,
 
 
 
+async def run_compression_job(req, labels):
+    start_time = time.time()
+
+    compressed_data_by_label = {}
+    G_by_label = {}
+    nodes_tensor_by_label = {}
+
+    for i, label in enumerate(labels):
+        await asyncio.sleep(0.3)
+        if globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"]:
+            yield {"type": "cancelled", "progress": i}
+            return 
+
+        compressed_subset, G, nodes_tensor = await compress_MFC_per_label(label, req)
+        if globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"]:
+            yield {"type": "cancelled", "progress": i}
+            return 
+
+        compressed_data_by_label[label] = compressed_subset
+        G_by_label[label] = G
+        nodes_tensor_by_label[label] = nodes_tensor
+        yield {"type": "progress", "progress": i}
+
+    summary = {
+        "compression_id": req.compression_job_id,
+        "dataset_name": req.dataset_name,
+        "timestamp": datetime.now(),
+        "norm": req.norm,
+        "k": req.k,
+        "elapsed_seconds": int(time.time() - start_time),
+        "labels": labels,
+    }
+    
+    print(globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"])
+    # Grab final object if complete
+    if not globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"]:
+        globals.ACTIVE_COMPRESSED_DATA_OBJ = CompressedDatasetObj(
+                                                compression_id=req.compression_job_id,
+                                                compressed_data_by_label=compressed_data_by_label,
+                                                G_by_label= G_by_label,
+                                                nodes_tensor_by_label= nodes_tensor_by_label,
+                                                summary=summary,
+                                                offsets_by_label={key: 0 for key in labels},
+                                            )
+    
+    yield {"type": "done"}
+    return 
+
+
+
+
+
+
 def to_numpy_matrix(A):
     """Convert A to a 2D numpy array. Accepts torch.Tensor or numpy array."""
     if isinstance(A, torch.Tensor):
@@ -168,6 +223,7 @@ def select_indices(matrix, k, threshold, num_samples):
         selected_indices = [sorted_indices[1 + int(i * step)] for i in range(num_samples)]
 
     return [int(idx) for idx in selected_indices]
+
 
 
 

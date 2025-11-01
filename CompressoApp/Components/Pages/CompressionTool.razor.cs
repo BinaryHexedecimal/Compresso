@@ -348,7 +348,7 @@ public partial class CompressionTool : ComponentBase, IDisposable
     {
         if (string.IsNullOrEmpty(CompressionId))
         {
-            SaveMessage = "⚠️No compression ID available.";
+            SaveMessage = "No compression ID available.";
             await ShowSaveMessageAsync(SaveMessage, false);
             return;
         }
@@ -368,7 +368,7 @@ public partial class CompressionTool : ComponentBase, IDisposable
             await InvokeAsync(StateHasChanged);
             await ShowSaveMessageAsync(response.SaveMessage, false);
         }
-        else if (response.SaveMessage == "✅Saved successfully.")
+        else if (response!.SaveMessage!.Contains("Saved successfully"))
         {
             HasSaved = true;
             await InvokeAsync(StateHasChanged);
@@ -376,7 +376,7 @@ public partial class CompressionTool : ComponentBase, IDisposable
         }
         else
         {
-            await ShowSaveMessageAsync("⚠️Unknown response from server.", false);
+            await ShowSaveMessageAsync("Unknown response from server.", false);
         }
         return;
     }
@@ -386,7 +386,7 @@ public partial class CompressionTool : ComponentBase, IDisposable
     {
         if (string.IsNullOrEmpty(CompressionId))
         {
-            SaveMessage = "⚠️No compression ID available.";
+            SaveMessage = "No compression ID available.";
             await ShowSaveMessageAsync(SaveMessage, false);
             return;
         }
@@ -402,7 +402,7 @@ public partial class CompressionTool : ComponentBase, IDisposable
 
     public async Task HandleCancelChoice()
     {
-        SaveMessage = "⚠️Save cancelled";
+        SaveMessage = "Save cancelled";
         ShowSaveOptions = false;
         await ShowSaveMessageAsync(SaveMessage);
     }

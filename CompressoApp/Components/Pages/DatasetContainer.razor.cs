@@ -254,18 +254,18 @@ public partial class DatasetContainer : ComponentBase
 
             if (response.IsSuccessStatusCode)
             {
-                msg = "✅Upload successful!";
+                msg = "Upload successful!";
             }
             else
             {
-                msg = $"⚠️Upload failed: {response.ReasonPhrase}";
+                msg = $"Upload failed: {response.ReasonPhrase}";
             }
 
-            msg = "✅Upload successful!";
+            msg = "Upload successful!";
         }
         catch (Exception ex)
         {
-            msg = $"⚠️Upload failed: {ex.Message}";
+            msg = $"Upload failed: {ex.Message}";
         }
 
         finally

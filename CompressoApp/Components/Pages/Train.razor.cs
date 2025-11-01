@@ -17,7 +17,7 @@ public partial class Train : ComponentBase, IDisposable
     private BackendUrls? backendUrls;
     private DotNetObjectReference<Train>? dotnetRef;
     private object? sseInstance;
-    private Timer? elapsedTimer;
+    //private Timer? elapsedTimer;
     private Stopwatch? trainStopwatch;
     private List<CompressionSummary> summaries { get; set; } = new List<CompressionSummary>();
 
@@ -73,10 +73,10 @@ public partial class Train : ComponentBase, IDisposable
     {
 
         backendUrls = Services.GetRequiredService<BackendUrls>();
-        backendUrl = backendUrls.External;
+        string backendUrl = backendUrls.External;
 
         // Create a timer that checks every 1 second
-        elapsedTimer = new Timer(async _ =>
+        Timer elapsedTimer = new Timer(async _ =>
         {
             if (IsTraining || IsTerminating)
             {
@@ -101,6 +101,8 @@ public partial class Train : ComponentBase, IDisposable
 
         summaries = await Api.LoadAllSummariesFromContainerAsync();
 
+        StateHasChanged();
+
     }
 
 
@@ -123,7 +125,7 @@ public partial class Train : ComponentBase, IDisposable
     {
         if (selectedEpoch == -1)
         {
-            SaveMessage = "⚠️Please select an epoch to save.";
+            SaveMessage = "Please select an epoch to save.";
             await ShowSaveMessageAsync(SaveMessage);
             return;
         }

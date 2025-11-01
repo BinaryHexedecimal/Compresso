@@ -44,7 +44,5 @@ NORM_MAP = {
 }
 
 
-ACTIVE_JOBS = {
-    "compression": {},  # e.g., {"job_id": {"cancel": False}}
-    "training": {}
-}
+ACTIVE_JOBS = {}
+ACTIVE_COMPRESSED_DATA_OBJ = None

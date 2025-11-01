@@ -1,7 +1,7 @@
 using CompressoApp.Models;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using System.Text;
+//using System.Text;
 
 namespace CompressoApp.Services;
 
@@ -196,8 +196,19 @@ public class ApiClient
 
     public async Task<List<CompressionSummary>> LoadAllSummariesFromContainerAsync()
     {
-        return await _http.GetFromJsonAsync<List<CompressionSummary>>("/summaries_from_container")
-            ?? new List<CompressionSummary>();
+        var summaries = await _http.GetFromJsonAsync<List<CompressionSummary>>("/summaries_from_container") 
+                    ?? new List<CompressionSummary>();
+
+        if (summaries.Count != 0)
+        {
+            // Sort by Timestamp descending (most recent first)
+            summaries = summaries.OrderBy(s => s.DatasetName)
+                            .ThenBy(s => s.K)
+                            .ThenBy(s => s.Norm)
+                            .ToList();
+        }
+
+        return summaries;
     }
 
 
@@ -236,9 +247,19 @@ public class ApiClient
 
     public async Task<List<SavedModelInfo>> GetSavedModelInfoAsync()
     {
-        var response = await _http.GetFromJsonAsync<List<SavedModelInfo>>("/get_models_info");
-        return response ?? new List<SavedModelInfo>();
+        var response = await _http.GetFromJsonAsync<List<SavedModelInfo>>("/get_models_info") 
+                    ?? new List<SavedModelInfo>();
+
+        // Sort by DatasetName in ascending (A-Z) order
+        response = response
+            .OrderBy(s => s.DatasetName)
+            .ThenBy(s => s.K)
+            .ThenBy(s => s.Kind)
+            .ToList();
+
+        return response;
     }
+
 
     public async Task<string> SaveModelAsync(int epoch, string trainId, SavedModelInfo info)
     {
@@ -274,7 +295,7 @@ public class ApiClient
             var response = await _http.DeleteAsync($"/delete_model/{modelId}");
 
             if (!response.IsSuccessStatusCode)
-                return $"❌ Delete failed: {response.StatusCode}";
+                return $"Delete failed: {response.StatusCode}";
 
             // Try to read JSON response
             var responseText = await response.Content.ReadAsStringAsync();
@@ -291,12 +312,12 @@ public class ApiClient
             }
 
             return string.IsNullOrWhiteSpace(responseText)
-                ? "✅ Model deleted."
+                ? "Model deleted."
                 : responseText;
         }
         catch (Exception ex)
         {
-            return $"❌ Error deleting model: {ex.Message}";
+            return $"Error deleting model: {ex.Message}";
         }
     }
 
@@ -307,14 +328,14 @@ public class ApiClient
             var response = await _http.DeleteAsync("/delete_all_models");
 
             if (!response.IsSuccessStatusCode)
-                return $"❌ Failed: {response.StatusCode}";
+                return $"Failed: {response.StatusCode}";
 
             var result = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
-            return result?["message"] ?? "✅ All models deleted.";
+            return result?["message"] ?? "All models deleted.";
         }
         catch (Exception ex)
         {
-            return $"❌ Error deleting all models: {ex.Message}";
+            return $"Error deleting all models: {ex.Message}";
         }
     }
 
@@ -379,9 +400,12 @@ public class ApiClient
             PropertyNameCaseInsensitive = true
         };
         options.Converters.Add(new BaseTrainRequestConverter());
-        var history = JsonSerializer.Deserialize<List<TrainingRun>>(response, options);
-        return history ?? new List<TrainingRun>();
+        var history = JsonSerializer.Deserialize<List<TrainingRun>>(response, options)
+                    ?? new List<TrainingRun>();
+        return history ;
     }
+
+
 
 
     public async Task<string> DeleteTrainingRunAsync(string train_id)
@@ -407,14 +431,14 @@ public class ApiClient
         {
             var response = await _http.DeleteAsync("/delete_all_history");
             if (!response.IsSuccessStatusCode)
-                return $"❌ Failed: {response.StatusCode}";
+                return $"Failed: {response.StatusCode}";
 
             var result = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
-            return result?["message"] ?? "✅ All History deleted.";
+            return result?["message"] ?? "All History deleted.";
         }
         catch (Exception ex)
         {
-            return $"❌ Error deleting all history: {ex.Message}";
+            return $"Error deleting all history: {ex.Message}";
         }
     }
 
