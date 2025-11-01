@@ -3,7 +3,8 @@ from src import MFC
 import numpy as np
 import networkx as nx
 import math
-import pickle
+import asyncio
+#import pickle
 
 
 from models import *
@@ -12,7 +13,7 @@ import globals
 
 
 
-def compress_MFC_per_label(label: str,
+async def compress_MFC_per_label(label: str,
                             req: CompressRequest,
                             num_per_center=globals.NUM_IMAGE_INSIDE_ETA,
                         ):
@@ -48,6 +49,11 @@ def compress_MFC_per_label(label: str,
     # File path for this label and norm
     A_path = os.path.join(A_dir, f"norm_{req.norm}_label_{label}.pt")
 
+    await asyncio.sleep(0.3)
+    if globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"]:
+        print(f"Compression is cancelled when label {label} is compressed, before calculate A ")
+        return None, None, None
+
     if not os.path.exists(A_path):
         # Compute and save
         A = mfc_model.distanceMatrix()
@@ -58,6 +64,10 @@ def compress_MFC_per_label(label: str,
         A = torch.load(A_path)
         print(f"Matrix A loaded from {A_path}")
 
+    await asyncio.sleep(0.3)
+    if globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"]:
+        print(f"Compression is cancelled when label {label} is compressed, before compreesion ")
+        return None, None, None
     compressed_subset, final_eta, sol, t_total = mfc_model.gen_data(A, eta=req.eta, k=req.k, solver=req.optimizer)
     final_eta = float(final_eta)
 
@@ -77,6 +87,14 @@ def compress_MFC_per_label(label: str,
     nodes_lst = center_idx_lst + satellite_idx_lst
     nodes_tensor = data_tensor[nodes_lst].detach().cpu()
     compressed_subset = compressed_subset.detach().cpu() if isinstance(compressed_subset, torch.Tensor) else compressed_subset
+    
+    await asyncio.sleep(0.3)
+    if globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"]:
+        print(f"Compression is cancelled when label {label} is compressed, before create G ")
+        return None, None, None
+
+    
+    
     # G
     mat = to_numpy_matrix(A)
     m = len(nodes_lst)
@@ -92,18 +110,18 @@ def compress_MFC_per_label(label: str,
     
     
 
-    os.makedirs(globals.TMP_DATA_FOR_GRAPH_DIR, exist_ok=True)
-    base = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{req.compression_job_id}"
+    #os.makedirs(globals.TMP_DATA_FOR_GRAPH_DIR, exist_ok=True)
+    #base = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{req.compression_job_id}"
 
-    graph_path = f"{base}.gpickle"
-    tensor_path = f"{base}_nodes.pt"
+    #graph_path = f"{base}.gpickle"
+    #tensor_path = f"{base}_nodes.pt"
 
-    with open(graph_path, "wb") as f:
-        pickle.dump(G, f)
+    #with open(graph_path, "wb") as f:
+    #    pickle.dump(G, f)
 
-    torch.save(nodes_tensor, tensor_path)
+    #torch.save(nodes_tensor, tensor_path)
 
-    return compressed_subset
+    return compressed_subset, G, nodes_tensor
 
 
 
@@ -150,3 +168,6 @@ def select_indices(matrix, k, threshold, num_samples):
         selected_indices = [sorted_indices[1 + int(i * step)] for i in range(num_samples)]
 
     return [int(idx) for idx in selected_indices]
+
+
+

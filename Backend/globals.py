@@ -42,3 +42,9 @@ NORM_MAP = {
     "MAX": float("inf"),
     "INF": float("inf"),
 }
+
+
+ACTIVE_JOBS = {
+    "compression": {},  # e.g., {"job_id": {"cancel": False}}
+    "training": {}
+}

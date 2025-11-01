@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import json
 from contextlib import asynccontextmanager
 import asyncio
-import pickle
+#import pickle
 import time
 import shutil
 import os
@@ -33,7 +33,7 @@ from src import *
 # ------------------ Global setup ------------------
 
 # Track cancel flags and active jobs
-ACTIVE_JOBS = {
+globals.ACTIVE_JOBS = {
     "compression": {},  # e.g., {"job_id": {"cancel": False}}
     "training": {}
 }
@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
         globals.DATA_PER_LABEL_DIR,
         globals.PERMANENT_TRAIN_MODELS_DIR,
         globals.ADJ_MATRIX_DIR,
-        globals.TMP_DATA_FOR_GRAPH_DIR,
+        #globals.TMP_DATA_FOR_GRAPH_DIR,
         globals.TMP_TRAIN_CHECKPOINT_DIR,
     ]:
         d.mkdir(parents=True, exist_ok=True)
@@ -93,8 +93,9 @@ async def lifespan(app: FastAPI):
 
 
     # Clean temp dirs
-    for path in [globals.TMP_DATA_FOR_GRAPH_DIR, 
-                  globals.TMP_TRAIN_CHECKPOINT_DIR]:
+    for path in [#globals.TMP_DATA_FOR_GRAPH_DIR, 
+                  globals.TMP_TRAIN_CHECKPOINT_DIR
+                  ]:
         if path.exists():
             for file in path.iterdir():
                 if file.is_file():
@@ -107,8 +108,8 @@ async def lifespan(app: FastAPI):
         prepare_test_data(id)
         
 
-    print("✅ All global state initialized")
-    print("✅ Backend startup complete.")
+    print("All global state initialized")
+    print("Backend startup complete.")
 
     # Hand control to FastAPI runtime
     yield
@@ -144,27 +145,28 @@ def gurobi_status():
         print("Checking Gurobi license...")
         env = gp.Env(empty=True)
         env.start()  # this triggers license check
-        print("✅ Gurobi environment initialized successfully")
+        print("Gurobi environment initialized successfully")
         return {"gurobi_valid": True}
     except gp.GurobiError as e:
-        print(f"❌ Gurobi license check failed: {e}")
+        print(f"Gurobi license check failed: {e}")
         return {"gurobi_valid": False} 
 
 
 @app.post("/compress")
-async def compress(req: CompressRequest):
+def compress(req: CompressRequest):
     start_time = time.time()
     job_id = req.compression_job_id
-    ACTIVE_JOBS["compression"][job_id] = {"cancel": False}
-
+    globals.ACTIVE_JOBS["compression"][job_id] = {"cancel": False}
     labels = load_dataset_classes()[req.dataset_name]
-
     async def event_stream():
         # Notify start
         yield f"data: {json.dumps({'type': 'start'})}\n\n"
         yield f"data: {json.dumps({'total': len(labels)})}\n\n"
         
         compressed_data_by_label = {}
+        G_by_label = {} 
+        nodes_tensor_by_label = {}
+
         for i, label in enumerate(labels):
 
             # have a rest/pause
@@ -172,15 +174,20 @@ async def compress(req: CompressRequest):
             # mega vigtigt!
             await asyncio.sleep(0.3)
 
-            if ACTIVE_JOBS["compression"][job_id]["cancel"]:
+            if globals.ACTIVE_JOBS["compression"][job_id]["cancel"]:
                 break
 
-            compressed_subset = compress_MFC_per_label(label, req)
+            compressed_subset, G, nodes_tensor = await compress_MFC_per_label(label, req)
+
+            if globals.ACTIVE_JOBS["compression"][job_id]["cancel"]:
+                break
             compressed_data_by_label[label] = compressed_subset
+            G_by_label[label] = G
+            nodes_tensor_by_label[label] = nodes_tensor
 
             yield f"data: {json.dumps({'progress': i})}\n\n"
 
-        if ACTIVE_JOBS["compression"][job_id]["cancel"]:
+        if globals.ACTIVE_JOBS["compression"][job_id]["cancel"]:
             yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
         else:
             summary = CompressionSummary(
@@ -194,16 +201,19 @@ async def compress(req: CompressRequest):
             )
 
             offsets_by_label = {key: 0 for key in labels}
+
             global active_compressed_data_obj
             active_compressed_data_obj = CompressedDatasetObj(
                 compression_id=req.compression_job_id,
                 compressed_data_by_label=compressed_data_by_label,
+                G_by_label= G_by_label,
+                nodes_tensor_by_label= nodes_tensor_by_label,
                 summary=summary,
                 offsets_by_label=offsets_by_label,
             )
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-        ACTIVE_JOBS["compression"].pop(job_id, None)
+        globals.ACTIVE_JOBS["compression"].pop(job_id, None)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -211,7 +221,7 @@ async def compress(req: CompressRequest):
 
 @app.delete("/cancel_compression/{compression_job_id}")
 def cancel_compression(compression_job_id: str):
-    job = ACTIVE_JOBS["compression"].get(compression_job_id)
+    job = globals.ACTIVE_JOBS["compression"].get(compression_job_id)
     if not job:
         raise HTTPException(404, f"Job {compression_job_id} not found and failed to cancel")
     job["cancel"] = True
@@ -224,7 +234,7 @@ def cancel_compression(compression_job_id: str):
 @app.post("/train")
 async def stream_training(req: BaseTrainRequest):
 
-    ACTIVE_JOBS["training"][req.train_job_id] = {"cancel": False}
+    globals.ACTIVE_JOBS["training"][req.train_job_id] = {"cancel": False}
 
     async def event_stream():
         req_ = req.model_dump()
@@ -282,7 +292,7 @@ async def stream_training(req: BaseTrainRequest):
         yield f"data: {json.dumps({'type': 'start'})}\n\n"
         for epoch in range(1, req_obj.num_iterations+1):
             await asyncio.sleep(0.2)
-            if ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:
+            if globals.ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:
                 break
 
             model_save_path = globals.TMP_TRAIN_CHECKPOINT_DIR / f"{req_obj.train_job_id}_epoch_{epoch}.pt"
@@ -365,7 +375,7 @@ async def stream_training(req: BaseTrainRequest):
                     "timestamp": datetime.now().isoformat(),
                     "epochs": all_epochs, 
                     "req_obj": vars(req_obj)}
-        if ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:            
+        if globals.ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:            
             run_info["status"]="cancelled"
         else:
             run_info["status"]= "done"
@@ -389,13 +399,13 @@ async def stream_training(req: BaseTrainRequest):
 
 
 
-        if ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:            
+        if globals.ACTIVE_JOBS["training"][req_obj.train_job_id]["cancel"]:            
             yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
             
         else:
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-        ACTIVE_JOBS["training"].pop(req.train_job_id, None)
+        globals.ACTIVE_JOBS["training"].pop(req.train_job_id, None)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -404,7 +414,7 @@ async def stream_training(req: BaseTrainRequest):
 
 @app.delete("/cancel_train/{train_id}")
 def cancel_training(train_id: str):
-    job = ACTIVE_JOBS["training"].get(train_id)
+    job = globals.ACTIVE_JOBS["training"].get(train_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Training Job {train_id} not found and fail to cancel.")
     job["cancel"]= True   # signal to worker
@@ -476,63 +486,80 @@ def sample_compressed_images(compression_job_id:str, label: str, n: int):
 
 @app.post("/get_graph_json/{compression_job_id}/{label}/{k}")
 def get_graph_json(compression_job_id: str, label: str, k: int):
-    read_path = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{compression_job_id}.gpickle"
-    with open(read_path, "rb") as f:
-        G = pickle.load(f)
-    fig = draw_graph(G, c=k)
-    fig_json = pio.to_json(fig)  # For frontend rendering
-    return JSONResponse(content={"fig_json": fig_json})
+    #read_path = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{compression_job_id}.gpickle"
+    #with open(read_path, "rb") as f:
+    #    G = pickle.load(f)
+    if (active_compressed_data_obj.compression_id == compression_job_id):
+        G = active_compressed_data_obj.G_by_label[label]
+        fig = draw_graph(G, c=k)
+        fig_json = pio.to_json(fig)  # For frontend rendering
+        return JSONResponse(content={"fig_json": fig_json})
+
+    else:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{active_compressed_data_obj.compression_id}'."
+        )
+    
 
 
 @app.get("/get_node_image/{compression_job_id}/{label}/{node_index}")
 def get_node_image(compression_job_id: str, label: str, node_index: int):
-    read_path = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{compression_job_id}_nodes.pt"
-    nodes =torch.load(read_path,  weights_only=False)
-    image_tensor = nodes[node_index]
-    img_bytes = tensor_to_image_bytes(image_tensor)
-    return Response(content=img_bytes, media_type="image/png")
+    #read_path = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{compression_job_id}_nodes.pt"
+    if (active_compressed_data_obj.compression_id == compression_job_id):
+        nodes = active_compressed_data_obj.nodes_tensor_by_label[label]
+        #nodes =torch.load(read_path,  weights_only=False)
+        image_tensor = nodes[node_index]
+        img_bytes = tensor_to_image_bytes(image_tensor)
+        return Response(content=img_bytes, media_type="image/png")
+    else:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid compression_job_id '{compression_job_id}'. Active job is '{active_compressed_data_obj.compression_id}'."
+        )
+    
 
-@app.delete("/delete_graph_data/{compressionId}")
-def delete_graphs(compressionId: str):
-    folder_dir = globals.TMP_DATA_FOR_GRAPH_DIR
-    if not folder_dir.exists():
-        return JSONResponse(content={"status": "ok", "message": "No graph folder found."})
-    deleted_files = 0
-    # Match *any* file that contains the compressionId, regardless of extension or prefix
-    for file in folder_dir.glob(f"*{compressionId}*"):
-        try:
-            file.unlink()
-            deleted_files += 1
-        except Exception as e:
-            print(f"Could not delete {file}: {e}")
-    return JSONResponse(content={
-        "status": "success",
-        "message": f"Deleted {deleted_files} graph files for compressionId '{compressionId}'."
-    })
+# @app.delete("/delete_graph_data/{compressionId}")
+# def delete_graphs(compressionId: str):
+#     folder_dir = globals.TMP_DATA_FOR_GRAPH_DIR
+#     if not folder_dir.exists():
+#         return JSONResponse(content={"status": "ok", "message": "No graph folder found."})
+#     deleted_files = 0
+#     # Match *any* file that contains the compressionId, regardless of extension or prefix
+#     for file in folder_dir.glob(f"*{compressionId}*"):
+#         try:
+#             file.unlink()
+#             deleted_files += 1
+#         except Exception as e:
+#             print(f"Could not delete {file}: {e}")
+#     return JSONResponse(content={
+#         "status": "success",
+#         "message": f"Deleted {deleted_files} graph files for compressionId '{compressionId}'."
+#     })
 
-@app.delete("/delete_all_graph_data")
-def delete_all_graph():
-    folder_dir = globals.TMP_DATA_FOR_GRAPH_DIR
+# @app.delete("/delete_all_graph_data")
+# def delete_all_graph():
+#     folder_dir = globals.TMP_DATA_FOR_GRAPH_DIR
 
-    if not folder_dir.exists():
-        return JSONResponse(content={
-            "status": "ok",
-            "message": "No graph folder found."
-        })
+#     if not folder_dir.exists():
+#         return JSONResponse(content={
+#             "status": "ok",
+#             "message": "No graph folder found."
+#         })
 
-    deleted_files = 0
-    for file in folder_dir.iterdir():
-        if file.is_file():
-            try:
-                file.unlink()
-                deleted_files += 1
-            except Exception as e:
-                print(f"Could not delete {file}: {e}")
+#     deleted_files = 0
+#     for file in folder_dir.iterdir():
+#         if file.is_file():
+#             try:
+#                 file.unlink()
+#                 deleted_files += 1
+#             except Exception as e:
+#                 print(f"Could not delete {file}: {e}")
 
-    return JSONResponse(content={
-        "status": "success",
-        "message": f"Deleted {deleted_files} graph files."
-    })
+#     return JSONResponse(content={
+#         "status": "success",
+#         "message": f"Deleted {deleted_files} graph files."
+#     })
 
 
 # ------------------ Summary supports  ------------------ #

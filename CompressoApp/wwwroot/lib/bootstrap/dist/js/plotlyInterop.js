@@ -1,7 +1,7 @@
 // ---Register the .NET reference (Blazor sends it once) ---
 window.setDotNetRefForGraph = function(dotNetRef) {
     window.DotNetRefForGraph = dotNetRef;
-    console.log("✅ .NET reference registered for Plotly interop");
+    console.log(" .NET reference registered for Plotly interop");
 };
 
 

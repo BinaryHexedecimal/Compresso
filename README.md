@@ -18,10 +18,14 @@
 
 ## Tech Stack
 
-- **Backend:** Python · FastAPI · PyTorch  
-- **Frontend:** ASP.NET Core (C# · Blazor)  
+- **Backend:** Python 3.11· FastAPI · PyTorch  
+- **Frontend:** C# · ASP.NET Core · Blazor Server (.NET 9)
+  - Includes custom JavaScript interop for client-side rendering and user interaction
+  - Interactive visualizations built with Plotly.js
+- **Communication:** HTTP (JSON) · Server-Sent Events (SSE) for real-time progress updates
 - **Containerization:** Docker · Docker Compose  
-- **Visualization:** Web-based interactive UI  
+- **Visualization:** Plotly.js · NetworkX (graph layout generation and interactive web UI)
+- **Data Formats:** JSON · .pt (trained models and compressed datasets in storage)
 
 
 

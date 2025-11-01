@@ -43,14 +43,14 @@ public class ApiClient
     }
 
 
-    public async Task<StartCompressionResponse?> StartCompressionAsync(CompressRequest req)
-    {
-        var json = JsonSerializer.Serialize(req);
-        var content = new StringContent(json, Encoding.UTF8, "application/json");
-        var resp = await _http.PostAsync("/compress", content);
-        resp.EnsureSuccessStatusCode();
-        return await resp.Content.ReadFromJsonAsync<StartCompressionResponse>();
-    }
+    // public async Task<StartCompressionResponse?> StartCompressionAsync(CompressRequest req)
+    // {
+    //     var json = JsonSerializer.Serialize(req);
+    //     var content = new StringContent(json, Encoding.UTF8, "application/json");
+    //     var resp = await _http.PostAsync("/compress", content);
+    //     resp.EnsureSuccessStatusCode();
+    //     return await resp.Content.ReadFromJsonAsync<StartCompressionResponse>();
+    // }
 
     public async Task<Stream> GetStreamCompressionAsync(string compression_job_id, CancellationToken token)
     {
@@ -124,31 +124,31 @@ public class ApiClient
         }
     }
 
-    public async Task<string> DeleteGraphDataAsync(string compressionId)
-    {
-        var response = await _http.DeleteAsync($"/delete_graph_data/{compressionId}");
-        if (!response.IsSuccessStatusCode)
-            return $"Failed: {response.StatusCode}";
+    // public async Task<string> DeleteGraphDataAsync(string compressionId)
+    // {
+    //     var response = await _http.DeleteAsync($"/delete_graph_data/{compressionId}");
+    //     if (!response.IsSuccessStatusCode)
+    //         return $"Failed: {response.StatusCode}";
 
-        var result = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
-        return result?["message"] ?? "Unknown response";
-    }
+    //     var result = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
+    //     return result?["message"] ?? "Unknown response";
+    // }
 
 
-    public async Task<string> DeleteAllGraphDataAsync()
-    {
-        var response = await _http.DeleteAsync($"/delete_all_graph_data");
-        if (response.IsSuccessStatusCode)
-        {
-            var json = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
-            return json?["message"] ?? "Deleted successfully.";
-        }
-        else
-        {
-            var error = await response.Content.ReadAsStringAsync();
-            return $"Failed to delete: {error}";
-        }
-    }
+    // public async Task<string> DeleteAllGraphDataAsync()
+    // {
+    //     var response = await _http.DeleteAsync($"/delete_all_graph_data");
+    //     if (response.IsSuccessStatusCode)
+    //     {
+    //         var json = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
+    //         return json?["message"] ?? "Deleted successfully.";
+    //     }
+    //     else
+    //     {
+    //         var error = await response.Content.ReadAsStringAsync();
+    //         return $"Failed to delete: {error}";
+    //     }
+    // }
 
 
     // --------------------- Summary -------------------------//

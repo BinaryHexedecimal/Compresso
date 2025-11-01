@@ -26,6 +26,8 @@ class CompressionSummary(BaseModel):
 class CompressedDatasetObj(BaseModel):
     compression_id: str
     compressed_data_by_label: dict
+    G_by_label: dict
+    nodes_tensor_by_label: dict
     summary: CompressionSummary
     offsets_by_label: dict # for visualisation
 

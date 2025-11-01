@@ -83,8 +83,8 @@ public partial class CompressionTool : ComponentBase, IDisposable
     protected async override void OnInitialized()
     {
         Clear();
-        var msg = await Api.DeleteAllGraphDataAsync();
-        Console.WriteLine(msg);
+        // var msg = await Api.DeleteAllGraphDataAsync();
+        //Console.WriteLine(msg);
 
         backendUrls = Services.GetRequiredService<BackendUrls>();
         backendUrl = backendUrls.External;
@@ -253,11 +253,11 @@ public partial class CompressionTool : ComponentBase, IDisposable
             }
             else if (type == "cancelled")
             {
-                if (!string.IsNullOrEmpty(CompressionId))
-                    {
-                        var msg = await Api.DeleteGraphDataAsync(CompressionId);
-                        Console.WriteLine(msg);
-                    }
+                // if (!string.IsNullOrEmpty(CompressionId))
+                //     {
+                //         var msg = await Api.DeleteGraphDataAsync(CompressionId);
+                //         Console.WriteLine(msg);
+                //     }
                 Clear();
                 StateHasChanged();
 
@@ -433,14 +433,14 @@ public partial class CompressionTool : ComponentBase, IDisposable
         }
     }
 
-    private async Task NewCompressionAsync()
+    private void NewCompression()
     {
         // Ask backend to delete checkpoints
-        if (!string.IsNullOrEmpty(CompressionId))
-        {
-            var msg = await Api.DeleteGraphDataAsync(CompressionId);
-            Console.WriteLine(msg);
-        }
+        // if (!string.IsNullOrEmpty(CompressionId))
+        // {
+        //     var msg = await Api.DeleteGraphDataAsync(CompressionId);
+        //     Console.WriteLine(msg);
+        // }
         Clear();
 
     }

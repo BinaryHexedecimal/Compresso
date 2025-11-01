@@ -1,7 +1,7 @@
 from PIL import Image
 import io
-import matplotlib
-matplotlib.use("Agg")  # Use non-GUI backend. Vigtigt!!!!
+#import matplotlib
+#matplotlib.use("Agg")  # Use non-GUI backend. Vigtigt!!!!
 import base64
 import random
 import numpy as np
