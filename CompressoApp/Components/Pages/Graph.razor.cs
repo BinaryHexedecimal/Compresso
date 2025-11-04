@@ -1,42 +1,52 @@
 using CompressoApp.Services;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
-using System.Text.Json;
+
 
 namespace CompressoApp.Components.Pages;
 
-public partial class Graph : ComponentBase
+public partial class Graph : ComponentBase, IDisposable
 {
 
     [Inject] private IJSRuntime JS { get; set; } = default!;
     [Inject] private ApiClient Api { get; set; } = default!;
-    [Inject] private NavigationManager NavManager { get; set; } = default!;
-
     [Parameter] public string jobId { get; set; } = default!;
     [Parameter] public string label { get; set; } = default!;
     [Parameter] public int k { get; set; } = 0;
     [Parameter] public string datasetName { get; set; } = ""!;
 
     private ElementReference _graphDivRef;
-    private string _pendingFigJson= string.Empty;
+    private string _pendingFigJson = string.Empty;
+    private DotNetObjectReference<Graph>? dotNetRef;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) { return; }
-        var _dotNetRef = DotNetObjectReference.Create(this);
-        await JS.InvokeVoidAsync("setDotNetRefForGraph", _dotNetRef);
+        dotNetRef = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("setDotNetRefForGraph", dotNetRef);
+        
+        // Get raw JSON string from the API client
+        var figJson = await Api.GetGraphJsonAsync(jobId, label, k);
 
-        var response = await Api.GetGraphJsonAsync(jobId,label,k);
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-
-        if (json.TryGetProperty("fig_json", out var figProp))
+        if (!string.IsNullOrWhiteSpace(figJson))
         {
-            _pendingFigJson = figProp.GetString()?? string.Empty;
-            await Task.Delay(300); 
+            _pendingFigJson = figJson;
+            await Task.Delay(200); 
             await JS.InvokeVoidAsync("ensurePlotlyReadyAndRender", _graphDivRef, _pendingFigJson, label);
+            StateHasChanged();
         }
 
     }
+
+
+
+    public void Dispose()
+    {
+        dotNetRef?.Dispose();
+        JS.InvokeVoidAsync("clearDotNetRefForGraph");
+        Console.WriteLine($"{GetType().Name} disposed.");
+    }
+
 
 
 

@@ -4,17 +4,6 @@ __pycache__/
 *.pyo
 .venv/
 
-# Temporary / generated data
-# data/
-# outputs/
-# tmp/
-# *.log
-# *.zip
-# *.tar
-# *.pth
-# *.pt
-# checkpoints/
-
 # Git
 .git/
 .gitignore

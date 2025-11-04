@@ -25,8 +25,6 @@ public partial class CompressionTool : ComponentBase, IDisposable
 
     private Timer? elapsedTimer;
     private string KError = "";
-    private string EtaError = "";
-
 
     // show center
     private bool showCenterImages = false;
@@ -41,27 +39,32 @@ public partial class CompressionTool : ComponentBase, IDisposable
 
 
     // Gurobi available?
-    private bool Gurobi { get; set; }
+    //private bool Gurobi { get; set; }
 
 
     private DotNetObjectReference<CompressionTool>? dotnetRef;
-    private object? sseInstance;
+    //private object? sseInstance;
 
+
+    // take the label with the fewest images here
+    private int OriginalMinSizePerLabel { get; set; }
+    // Placeholder string computed dynamically
+    private string KPlaceholder { get; set; } = string.Empty;
 
 
     // compression settings
     private string? CompressionId { get; set; }
     private string DatasetName { get; set; } = "";
-    private string Norm { get; set; } = "L2";
-    private int K { get; set; } = 10;
-    private double? Eta { get; set; } = null;
-    private string Optimizer { get; set; } = "gurobi";
+    private string Norm { get; set; } = "";
+    private int? K { get; set; } = null;
+    private string Optimizer { get; set; } = "";
 
 
     // compression progress
     private int ElapsedSeconds { get; set; } = 0;
     private int Progress { get; set; } = 0;
-    private int Total { get; set; } = 10;
+    private int Total { get; set; } = -1;
+
     private bool IsCompressing { get; set; } = false;
     private bool IsPreparingForCompression { get; set; } = false;
     private bool HasFinished { get; set; } = false;
@@ -79,16 +82,11 @@ public partial class CompressionTool : ComponentBase, IDisposable
 
 
 
-
     protected async override void OnInitialized()
     {
         Clear();
-        // var msg = await Api.DeleteAllGraphDataAsync();
-        //Console.WriteLine(msg);
-
         backendUrls = Services.GetRequiredService<BackendUrls>();
         backendUrl = backendUrls.External;
-
 
         dotnetRef = DotNetObjectReference.Create(this);
 
@@ -112,7 +110,7 @@ public partial class CompressionTool : ComponentBase, IDisposable
 
         await DatasetInfoManager.RefreshFromBackendAsync();
 
-        Gurobi = await Api.GetGurobiStatusAsync();
+        //Gurobi = await Api.GetGurobiStatusAsync();
 
         StateHasChanged();
     }
@@ -122,7 +120,9 @@ public partial class CompressionTool : ComponentBase, IDisposable
     private void StateClear()
     {
         Progress = 0;
-        Total = 10;
+        Total = -1;
+        OriginalMinSizePerLabel = -1;
+        KPlaceholder = "";
         IsPreparingForCompression = false;
         ElapsedSeconds = 0;
         CompressionId = "";
@@ -133,10 +133,9 @@ public partial class CompressionTool : ComponentBase, IDisposable
         IsCancelling = false;
 
         DatasetName = "";
-        Norm = "L2";
-        K = 10;
-        Eta = null;
-        Optimizer = "gurobi";
+        Norm = "";
+        K = null;
+        Optimizer = "";
 
         StateHasChanged();
     }
@@ -145,7 +144,6 @@ public partial class CompressionTool : ComponentBase, IDisposable
         SaveMessage = "";
         CandidateDuplicateId = "";
         KError = "";
-        EtaError = "";
         showCenterImages = false;
         centerImages.Clear();
         ShowSaveOptions = false;
@@ -161,19 +159,26 @@ public partial class CompressionTool : ComponentBase, IDisposable
         SettingClear();
     }
 
-    void OnDatasetChanged(string newDatasetName)
+    private async Task OnDatasetChanged(string newDatasetName)
     {
         if (string.IsNullOrWhiteSpace(newDatasetName))
         {
             DatasetName = string.Empty;
-            Total = 0;
+            Total = -1;
             return;
         }
         Clear();
 
         DatasetName = newDatasetName;
         Total = DatasetInfoManager.Labels[DatasetName].Count;
+
+        OriginalMinSizePerLabel = await Api.RequireOriginalDasasetMinSizePerLabelAsync(newDatasetName);
+        KPlaceholder = $"int between 1 and {OriginalMinSizePerLabel}";
+
+        StateHasChanged();
     }
+
+
 
 
     private async Task StartCompression()
@@ -186,17 +191,16 @@ public partial class CompressionTool : ComponentBase, IDisposable
         {
             CompressionJobId = CompressionId,
             OriginDatasetName = DatasetName,
-            K = K,
-            Eta = Eta ?? 0.0,
+            K = K ?? -1,
             Norm = Norm,
             Optimizer = Optimizer
         };
 
         var reqJson = JsonSerializer.Serialize(req);
 
-        sseInstance = await JS.InvokeAsync<object>(
+        await JS.InvokeAsync<object>(
             "startSSEPost",
-            $"{backendUrls!.External}/compress",
+            $"{backendUrl}/compress",
             reqJson,
             dotnetRef
         );
@@ -253,14 +257,7 @@ public partial class CompressionTool : ComponentBase, IDisposable
             }
             else if (type == "cancelled")
             {
-                // if (!string.IsNullOrEmpty(CompressionId))
-                //     {
-                //         var msg = await Api.DeleteGraphDataAsync(CompressionId);
-                //         Console.WriteLine(msg);
-                //     }
                 Clear();
-                StateHasChanged();
-
             }
         }
     }
@@ -284,39 +281,32 @@ public partial class CompressionTool : ComponentBase, IDisposable
     public void Dispose()
     {
         elapsedTimer?.Dispose();
+        dotnetRef?.Dispose();
+        _ = JS.InvokeVoidAsync("stopSSE", $"{backendUrl}/compress");
+        Console.WriteLine($"{GetType().Name} disposed.");
     }
-
 
     private void ValidateK(ChangeEventArgs e)
     {
-        if (int.TryParse(e.Value?.ToString(), out int value))
+        if (int.TryParse(e.Value?.ToString(), out var kValue))
         {
-            if (value < 1 || value > 500)
-                KError = "k must between 1 and 500.";
+            if (kValue < 1 || kValue >= OriginalMinSizePerLabel)
+            {
+                KError = $"Value must be between 1 and {OriginalMinSizePerLabel}.";
+            }
             else
+            {
                 KError = "";
+            }
         }
         else
         {
-            KError = "k must be an integer.";
+            KError = "Invalid number.";
         }
+
+        K = kValue;
+        StateHasChanged();
     }
-
-    // private void ValidateEta(ChangeEventArgs e)
-    // {
-    //     if (double.TryParse(e.Value?.ToString(), out double value))
-    //     {
-    //         if (value < 0)
-    //             EtaError = "eta must be positive.";
-    //         else
-    //             EtaError = "";
-    //     }
-    //     else
-    //     {
-    //         EtaError = "eta must be a number.";
-    //     }
-    // }
-
 
     private async Task ToggleCenterFigures()
     {
@@ -435,14 +425,7 @@ public partial class CompressionTool : ComponentBase, IDisposable
 
     private void NewCompression()
     {
-        // Ask backend to delete checkpoints
-        // if (!string.IsNullOrEmpty(CompressionId))
-        // {
-        //     var msg = await Api.DeleteGraphDataAsync(CompressionId);
-        //     Console.WriteLine(msg);
-        // }
         Clear();
-
     }
 
 }

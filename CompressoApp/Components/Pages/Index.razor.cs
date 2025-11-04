@@ -1,5 +1,4 @@
 using CompressoApp.Services;
-using CompressoApp.Models;
 using Microsoft.AspNetCore.Components;
 using Label = System.String;
 
@@ -7,10 +6,9 @@ namespace CompressoApp.Components.Pages;
 
 public partial class Index : ComponentBase
 {
-    //[Inject] private NavigationManager NavManager { get; set; } = default!;
     [Inject] private ImageService ImageService { get; set; } = default!;
-    //[Inject] private ApiClient Api { get; set; } = default!;
     [Inject] private DatasetInfoService DatasetInfoManager { get; set; } = default!;
+    
     private int numImagesPerRow = 14;
     private bool showImages = false;
     private Dictionary<string, List<string>> Images { get; set; } = new();

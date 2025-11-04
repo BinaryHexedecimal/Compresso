@@ -18,7 +18,6 @@ public partial class CompressedContainer : ComponentBase
     protected override async Task OnInitializedAsync()
     {
         summaries = await Api.LoadAllSummariesFromContainerAsync();
-        
         backendUrls = Services.GetRequiredService<BackendUrls>();
         backendUrl = backendUrls.External;
     }
@@ -53,8 +52,6 @@ public partial class CompressedContainer : ComponentBase
 
         summaries = await Api.LoadAllSummariesFromContainerAsync();
         await InvokeAsync(StateHasChanged);
-
-        //Console.WriteLine(result);
     }
 
 
@@ -63,7 +60,7 @@ public partial class CompressedContainer : ComponentBase
         var sm = summaries!.First(s => string.Equals(s.CompressionJobId, compressionJobId, StringComparison.OrdinalIgnoreCase));
         var desired = $"compressed_data_{sm.DatasetName}_{sm.Norm}_K_{sm.K}.pt";
 
-        var apiUrl = $"{backendUrls!.External}/download_compressed_data/{compressionJobId}?display_name={Uri.EscapeDataString(desired)}";
+        var apiUrl = $"{backendUrl}/download_compressed_data/{compressionJobId}?display_name={Uri.EscapeDataString(desired)}";
 
         await JS.InvokeVoidAsync("downloadFileFromUrl", apiUrl, desired);
     }

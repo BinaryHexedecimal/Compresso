@@ -61,25 +61,6 @@ else
                             </button>
                         </td>
 
-
-                            @* <td>
-                                @if (evaluatingModelId == modelInfo.ModelId)
-                                {
-                                    <button class="btn btn-secondary" disabled style="width:130px">
-                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                                        &nbsp;Running...
-                                    </button>
-                                }
-                                else
-                                {
-                                    <button class="action-btn primary"
-                                            style="width:150px"
-                                            @onclick="() => Evaluate(modelInfo.ModelId)">
-                                        Evaluate
-                                    </button>
-                                }
-                            </td> *@
-
                         <td>@{
                                 if (modelInfo.TestAcc!= -1)
                                 {

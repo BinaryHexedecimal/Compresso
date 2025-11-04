@@ -16,15 +16,16 @@ public partial class Train : ComponentBase, IDisposable
     private string backendUrl = string.Empty;
     private BackendUrls? backendUrls;
     private DotNetObjectReference<Train>? dotnetRef;
-    private object? sseInstance;
-    //private Timer? elapsedTimer;
+
     private Stopwatch? trainStopwatch;
+    private Timer? elapsedTimer;
     private List<CompressionSummary> summaries { get; set; } = new List<CompressionSummary>();
 
 
     private int selectedEpoch = -1;
     private string SaveMessage = "";
     private bool HasSavedModel = false;
+    //private bool IsSaving = false;
 
 
 
@@ -73,10 +74,10 @@ public partial class Train : ComponentBase, IDisposable
     {
 
         backendUrls = Services.GetRequiredService<BackendUrls>();
-        string backendUrl = backendUrls.External;
+        backendUrl = backendUrls.External;
 
         // Create a timer that checks every 1 second
-        Timer elapsedTimer = new Timer(async _ =>
+        elapsedTimer = new Timer(async _ =>
         {
             if (IsTraining || IsTerminating)
             {
@@ -138,14 +139,16 @@ public partial class Train : ComponentBase, IDisposable
             Kind = SelectedTrainingType ?? "standard",
             TestAcc = EpochMetricsList[selectedEpoch].TestAcc
         };
-
+        //IsSaving = true;
+        StateHasChanged();
         var resultMessage = await Api.SaveModelAsync(selectedEpoch+1, CurrentTrainId, info);
 
         SaveMessage = resultMessage;
         HasSavedModel = true;
-
+        //IsSaving = false;
+        StateHasChanged();
         await ShowSaveMessageAsync(SaveMessage);
-        await InvokeAsync(StateHasChanged);
+        //await InvokeAsync(StateHasChanged);
     }
 
 
@@ -220,9 +223,9 @@ public partial class Train : ComponentBase, IDisposable
         dotnetRef ??= DotNetObjectReference.Create(this);
 
         // Call JS to start SSE POST
-        sseInstance = await JS.InvokeAsync<object>(
+        await JS.InvokeAsync<object>(
             "startSSEPost",
-            $"{backendUrls!.External}/train",
+            $"{backendUrl}/train",
             reqJson,
             dotnetRef
         );
@@ -233,6 +236,11 @@ public partial class Train : ComponentBase, IDisposable
     public void Dispose()
     {
         dotnetRef?.Dispose();
+        elapsedTimer?.Dispose();
+
+        // Trigger SSE cleanup in JavaScript if needed
+        _ = JS.InvokeVoidAsync("stopSSE", $"{backendUrl}/train");
+        Console.WriteLine($"{GetType().Name} disposed.");
     }
 
     [JSInvokable]
@@ -348,12 +356,9 @@ public partial class Train : ComponentBase, IDisposable
         selectedEpoch = -1;
         SaveMessage = "";
         HasSavedModel = false;
+        //IsSaving = false;
         StateHasChanged();
     }
-
-
-
-
 
 
     private async Task NewTrainingAsync()

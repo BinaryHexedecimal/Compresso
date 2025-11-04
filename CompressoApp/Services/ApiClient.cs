@@ -1,7 +1,6 @@
 using CompressoApp.Models;
 using System.Net.Http.Headers;
 using System.Text.Json;
-//using System.Text;
 
 namespace CompressoApp.Services;
 
@@ -21,7 +20,7 @@ public class ApiClient
     {
         try
         {
-            var response = await _http.GetAsync("/gurobi-status");
+            using var response = await _http.GetAsync("/gurobi-status");
             if (!response.IsSuccessStatusCode)
                 return false;
 
@@ -42,26 +41,6 @@ public class ApiClient
         }
     }
 
-
-    // public async Task<StartCompressionResponse?> StartCompressionAsync(CompressRequest req)
-    // {
-    //     var json = JsonSerializer.Serialize(req);
-    //     var content = new StringContent(json, Encoding.UTF8, "application/json");
-    //     var resp = await _http.PostAsync("/compress", content);
-    //     resp.EnsureSuccessStatusCode();
-    //     return await resp.Content.ReadFromJsonAsync<StartCompressionResponse>();
-    // }
-
-    public async Task<Stream> GetStreamCompressionAsync(string compression_job_id, CancellationToken token)
-    {
-        var url = $"/compress/{compression_job_id}";
-        var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-        var resp = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
-        resp.EnsureSuccessStatusCode();
-        return await resp.Content.ReadAsStreamAsync(token);
-    }
-
     public async Task CancelCompressionAsync(string compression_job_id)
     {
         Console.WriteLine("here send msg to backend to cancel");
@@ -69,6 +48,13 @@ public class ApiClient
     }
 
 
+    public async Task<int> RequireOriginalDasasetMinSizePerLabelAsync(string dataset_name)
+    {
+        var url = $"/fetch_origin_dataset_min_size_per_label/{dataset_name}";
+        var result = await _http.GetFromJsonAsync<int?>(url);
+        Console.WriteLine(result);
+        return result ?? -1;
+    }
 
 
     // --------------------- Image support -------------------------//
@@ -108,14 +94,24 @@ public class ApiClient
         return $"data:image/png;base64,{base64}";
     }
 
-    public async Task<HttpResponseMessage> GetGraphJsonAsync(string compressionJobId, string label, int k)
+
+    public async Task<string> GetGraphJsonAsync(string compressionJobId, string label, int k)
     {
         try
         {
             var url = $"/get_graph_json/{compressionJobId}/{label}/{k}";
-            var response = await _http.PostAsync(url, null);
-            response.EnsureSuccessStatusCode(); // throws if not 2xx
-            return response;
+            using var response = await _http.PostAsync(url, null);
+            response.EnsureSuccessStatusCode();
+            var content = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(content);
+
+            if (doc.RootElement.TryGetProperty("fig_json", out var figProp))
+            {
+                return figProp.GetString() ?? string.Empty;
+            }
+
+            return string.Empty; // No fig_json found case
+
         }
         catch (Exception ex)
         {
@@ -124,31 +120,6 @@ public class ApiClient
         }
     }
 
-    // public async Task<string> DeleteGraphDataAsync(string compressionId)
-    // {
-    //     var response = await _http.DeleteAsync($"/delete_graph_data/{compressionId}");
-    //     if (!response.IsSuccessStatusCode)
-    //         return $"Failed: {response.StatusCode}";
-
-    //     var result = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
-    //     return result?["message"] ?? "Unknown response";
-    // }
-
-
-    // public async Task<string> DeleteAllGraphDataAsync()
-    // {
-    //     var response = await _http.DeleteAsync($"/delete_all_graph_data");
-    //     if (response.IsSuccessStatusCode)
-    //     {
-    //         var json = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
-    //         return json?["message"] ?? "Deleted successfully.";
-    //     }
-    //     else
-    //     {
-    //         var error = await response.Content.ReadAsStringAsync();
-    //         return $"Failed to delete: {error}";
-    //     }
-    // }
 
 
     // --------------------- Summary -------------------------//

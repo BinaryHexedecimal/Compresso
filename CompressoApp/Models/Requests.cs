@@ -15,9 +15,6 @@ public class CompressRequest
     [JsonPropertyName("k")]
     public int K { get; set; }
 
-    [JsonPropertyName("eta")]
-    public double Eta { get; set; }
-
     [JsonPropertyName("norm")]
     public string Norm { get; set; } = "";
 
@@ -25,19 +22,6 @@ public class CompressRequest
     public string Optimizer { get; set; } = "";
 
 }
-
-public class EvaluationRequest
-{
-    [JsonPropertyName("evaluation_id")]
-    public string EvaluationId { get; set; } = default!;
-    [JsonPropertyName("dataset_name")]
-    public string DatasetName { get; set; } = default!;
-    [JsonPropertyName("model_id")]
-    public string ModelId { get; set; } = default!;
-    [JsonPropertyName("train_")]
-    public bool Train_ { get; set; } = false;  // defaults to test
-}
-
 
 
 public abstract class BaseTrainRequest

@@ -5,25 +5,25 @@
 @using CompressoApp.Models
 
 
-
 <h2 class="mb-4">Compress</h2>
 
 <div class="row gx-4 align-items-start">
     <!-- Left Side-->
     <div class="col-md-3 border-end pe-4" >  
         <!-- Set Parameters -->
+
         <div class="col-md-12 mb-3">
             <label class="form-label fw-bold">Dataset</label>
             <DatasetSelector 
-                Value="DatasetName"
+                Value="@DatasetName"
                 ValueChanged="OnDatasetChanged"
                 Disabled="@(IsCompressing 
-                || HasFinished
-                || IsCancelling)" />
+                            || HasFinished
+                            || IsCancelling)" />
         </div>
 
         <div class="col-md-12 mb-3">
-            <label class="form-label fw-bold" placeholder="L2" >Norm</label>
+            <label class="form-label fw-bold">Norm</label>
             <NormSelector @bind-Value="Norm" 
                 Disabled="@(IsCompressing || HasFinished)"/>
         </div>
@@ -31,41 +31,28 @@
         <div class="col-md-12 mb-3 ">
             <label class="form-label fw-bold">Optimizer</label> 
             <OptimizerSelector @bind-Value="Optimizer" 
-                Disabled="@(IsCompressing || HasFinished)" 
-                Gurobi=@Gurobi />
+                Disabled="@(IsCompressing || HasFinished)" />
         </div>
 
-        <div class="col-md-12 mb-3 "> 
-            <label class="form-label fw-bold me-2" >k</label> 
-            <input type="number" step="1" @bind="K" placeholder="-- k -- " 
-            class="form-control flex-grow-1" 
-            Disabled="@(IsCompressing || HasFinished)" 
-            @oninput="ValidateK"
-            /> 
+        <div class="col-md-12 mb-3"> 
+            <label class="form-label fw-bold me-2">k</label> 
+            <input type="number"
+                step="1"
+                @bind="K"
+                placeholder="@KPlaceholder"
+                class="form-control flex-grow-1"
+                disabled="@(IsCompressing || HasFinished)"
+                @oninput="ValidateK" /> 
+
             @if (!string.IsNullOrEmpty(KError))
             {
                 <div class="text-danger">@KError</div>
             }
-        </div> 
+        </div>
 
-        <!-- Eta -->
-        @* <div class="col-md-12 mb-3"> 
-            <label class="form-label fw-bold me-2" >Eta</label> 
-            <input type="number" step="0.01" @bind="Eta" 
-            placeholder="eta (optional)" class="form-control" 
-            Disabled="@(IsCompressing || HasFinished )" 
-            @oninput="ValidateEta"
-            /> 
-            @if (!string.IsNullOrEmpty(EtaError))
-            {
-                <div class="text-danger">@EtaError</div>
-            }
-        </div> *@
-
-        <!-- Left Side: compression progress -->
+        <!-- compression progress -->
         @if (!HasFinished)
-        {
-        
+        {       
             @if (IsCompressing)
             {
             <div class="d-flex align-items-center gap-2">
@@ -91,12 +78,15 @@
             }
 
             else
-            {
+            {              
                 <button class="action-btn primary flex-grow-1 me-2"
                         disabled="@(IsCompressing
-                            ||      string.IsNullOrWhiteSpace(DatasetName)
-                            ||!string.IsNullOrWhiteSpace(EtaError)
+                            ||string.IsNullOrWhiteSpace(DatasetName)
+                            ||string.IsNullOrWhiteSpace(Optimizer)
+                            ||string.IsNullOrWhiteSpace(Norm)
                             ||!string.IsNullOrEmpty(KError)
+                            ||K == null
+                            ||K == -1
                             ||HasFinished)"
                         @onclick="async () => 
                         {await StartCompression();}">

@@ -25,7 +25,6 @@ public partial class DatasetContainer : ComponentBase
 
     private async Task<bool> LoadDatasetNamesAsync()
     {
-        // Load all dataset names from the container
         var latest = await Api.GetDatasetNamesAsync();
 
         // Normalize: sort alphabetically for consistent comparison

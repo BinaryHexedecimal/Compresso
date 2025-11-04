@@ -9,15 +9,13 @@ namespace CompressoApp.Components.Pages;
 public partial class Model: ComponentBase
 {
     [Inject] private ApiClient Api { get; set; } = default!;
-    [Inject] private NavigationManager NavManager { get; set; } = default!;
     [Inject] private IJSRuntime JS { get; set; } = default!;
     [Inject] private IServiceProvider Services { get; set; } = default!;
+
     private string backendUrl = string.Empty;
     private BackendUrls? backendUrls;
 
     private List<SavedModelInfo>? modelInfos = new List<SavedModelInfo>();
-
-    private Dictionary<string, double> acc = new Dictionary<string, double>();
 
 
     protected override async Task OnInitializedAsync()
@@ -27,10 +25,6 @@ public partial class Model: ComponentBase
         backendUrls = Services.GetRequiredService<BackendUrls>();
         backendUrl = backendUrls.External;
     }
-
-
-
-    private void Nav(string path) => NavManager.NavigateTo(path);
 
     private async Task HandleDelete(string modelId)
     {
@@ -47,7 +41,7 @@ public partial class Model: ComponentBase
         var mi = modelInfos!.First(m => string.Equals(m.ModelId, modelId, StringComparison.OrdinalIgnoreCase));
         var desired = $"trained_model_{mi.DatasetName}_{mi.Kind}_K_{mi.K}.pt";
 
-        var apiUrl = $"{backendUrls!.External}/download_model/{modelId}?display_name={Uri.EscapeDataString(desired)}";
+        var apiUrl = $"{backendUrl}/download_model/{modelId}?display_name={Uri.EscapeDataString(desired)}";
         await JS.InvokeVoidAsync("downloadFileFromUrl", apiUrl, desired);
     }
 

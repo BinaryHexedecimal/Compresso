@@ -9,7 +9,7 @@
 <h1>Train History</h1>
 
 <div class="row gx-4 align-items-start">
-<!-- Column 1: Dataset Selection -->
+
 <div class="col-md-8 border-end pe-2" style="align-self: flex-start;">
 @if (history == null)
 {
@@ -20,13 +20,13 @@ else
     <table class="table history-table" style="font-size: 12px;">
         <thead>
             <tr>
+                <th>Timestamp </th>
                 <th>Dataset</th>
                 <th>K</th>
                 <th>Norm</th>
                 <th>Kind</th>
                 <th>Optimizer</th>
                 <th>LR</th>
-                <th>Timestamp </th>
                 <th>                 
                     <button class="btn btn-danger"
                         style="width:120px"
@@ -51,10 +51,10 @@ else
                 @foreach (var trainingRun in history!.OrderByDescending(h => h.Timestamp))
                 {                   
                     <tr class="@(trainingRun.TrainJobId == highlightTrainJobId ? "table-active" : "")">
+                        <td>@trainingRun.Timestamp.ToString("yyyy-MM-dd HH:mm")</td>
                         <td>@trainingRun.TrainRequest.DataInfo["dataset_name"]</td>
                         <td>@trainingRun.TrainRequest.DataInfo["k"]</td>
                         <td>@trainingRun.TrainRequest.DataInfo["norm"]</td>
-                        
                         <td>
                             @if (trainingRun.TrainRequest.Kind == "adversarial")
                             {
@@ -74,12 +74,8 @@ else
                                 <span>@trainingRun.TrainRequest.Kind</span>
                             }
                         </td>
-
-
-
                         <td>@trainingRun.TrainRequest.Optimizer</td>
                         <td>@trainingRun.TrainRequest.LearningRate</td>
-                        <td>@trainingRun.Timestamp.ToString("yyyy-MM-dd HH:mm")</td>
                         <td>
                             <div class="d-flex flex-column">
                                 <button class="action-btn primary mb-2"

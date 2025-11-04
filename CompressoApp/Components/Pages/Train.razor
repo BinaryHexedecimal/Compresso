@@ -1,5 +1,4 @@
 ﻿@page "/train"
-@* @page "/train/new" *@
 
 @rendermode InteractiveServer
 
@@ -62,23 +61,6 @@
             </button>
         </div>
     }
-
-
-    @* @if (HasCompleted || HasTerminated)
-    {
-        <div class="col-md-4 d-flex align-items-center">
-            <h5>Results (accuracy):</h5>             
-        </div>
-    }
-    else if (IsPreparingForTraining || IsTraining ||IsTerminating)
-    {
-        <button @onclick="CancelTraining" 
-        class="btn btn-danger"
-        disabled="@(IsTerminating)"
-        style="width: 150px;">
-        @(IsTerminating ? "Terminating..." : "Terminate")
-        </button>
-    } *@
 
 </div>
 

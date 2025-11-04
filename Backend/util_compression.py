@@ -2,11 +2,8 @@ import torch
 import numpy as np
 import networkx as nx
 import math
-import asyncio
 import time, asyncio
 from datetime import datetime
-
-
 
 from src import MFC
 from models import *
@@ -14,143 +11,127 @@ from util_dataset import *
 import globals
 
 
-
-async def compress_MFC_per_label(label: str,
-                            req: CompressRequest,
-                            num_per_center=globals.NUM_IMAGE_INSIDE_ETA,
-                        ):
-
-    """
-    Compress a dataset using Minimum Finite Covering (MFC) per label.
-    Supports early cancellation via cancel_callback.
-    Works in multiprocessing.Process architecture.
-    """
+# Compress data for a single label using MFC, with periodic cancel checks.
+async def compress_MFC_per_label(
+    label: str,
+    req: CompressRequest,
+    num_per_center: int = globals.NUM_IMAGE_INSIDE_ETA,
+):
     if req.dataset_name in globals.BUILT_IN_DATASET_NAMES:
         path = f"{globals.DATA_PER_LABEL_DIR}/{req.dataset_name}_percent_{globals.BUILT_IN_DATASET_PERCENT}/{label}.pt"
     else:
         path = f"{globals.DATA_PER_LABEL_DIR}/{req.dataset_name}_percent_{globals.USER_DATASET_PERCENT}/{label}.pt"
 
     obj = torch.load(path, weights_only=False)
-
     data_tensor = obj.stacked_tensor
-    
+
+    # Initialize MFC model with data and norm setting
     norm_float = globals.NORM_MAP[req.norm]
     mfc_model = MFC(data_tensor, norm=norm_float)
 
+    # Folder and file for the cached or computed adjacency/distance matrix
     if req.dataset_name in globals.BUILT_IN_DATASET_NAMES:
         subdir = f"{req.dataset_name}_percent_{globals.BUILT_IN_DATASET_PERCENT}"
     else:
         subdir = f"{req.dataset_name}_percent_{globals.USER_DATASET_PERCENT}"
-
-    # Folder where the .pt file will be stored
     A_dir = os.path.join(globals.ADJ_MATRIX_DIR, subdir)
-
-    # Ensure the subfolder exists
     os.makedirs(A_dir, exist_ok=True)
-
-    # File path for this label and norm
     A_path = os.path.join(A_dir, f"norm_{req.norm}_label_{label}.pt")
 
-    await asyncio.sleep(0.3)
+
+
+
+    # Allow event loop to process cancellation requests
+    await asyncio.sleep(0.2) ## mega vigtig!!
     if globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"]:
-        print(f"Compression is cancelled when label {label} is compressed, before calculate A ")
         return None, None, None
 
+    # Load or compute the distance matrix
     if not os.path.exists(A_path):
-        # Compute and save
         A = mfc_model.distanceMatrix()
         torch.save(A, A_path)
-        print(f"Matrix A computed and saved to {A_path}")
     else:
-        # Load existing tensor
         A = torch.load(A_path)
-        print(f"Matrix A loaded from {A_path}")
 
+
+
+
+    # Perform MFC compression and get selected points and distances
     await asyncio.sleep(0.3)
     if globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"]:
-        print(f"Compression is cancelled when label {label} is compressed, before compreesion ")
         return None, None, None
-    compressed_subset, final_eta, sol, t_total = mfc_model.gen_data(A, eta=req.eta, k=req.k, solver=req.optimizer)
+    
+    compressed_subset, final_eta, sol, t_total = mfc_model.gen_data(
+        A,  k=req.k, solver=req.optimizer
+    )
     final_eta = float(final_eta)
 
-    # satellite nodes images tensor
+    # Center nodes chosen by MFC
     center_idx_lst = (torch.nonzero(torch.tensor(sol)).reshape(-1)).tolist()
 
+    # Satellites are additional nearby points within eta-distance
     satellite_idx_set = set()
     for c in center_idx_lst:
-        selected_indices  = select_indices(A,  c , final_eta, num_per_center)
+        selected_indices = select_indices(A, c, final_eta, num_per_center)
         satellite_idx_set.update(selected_indices)
 
-    # remove overlap with center list
+    # Remove any overlap with centers
     satellite_idx_set -= set(center_idx_lst)
-
     satellite_idx_lst = list(satellite_idx_set)
 
+    # Construct tensor from center + satellite nodes
     nodes_lst = center_idx_lst + satellite_idx_lst
     nodes_tensor = data_tensor[nodes_lst].detach().cpu()
-    compressed_subset = compressed_subset.detach().cpu() if isinstance(compressed_subset, torch.Tensor) else compressed_subset
-    
+    compressed_subset = (
+        compressed_subset.detach().cpu()
+        if isinstance(compressed_subset, torch.Tensor)
+        else compressed_subset
+    )
+
+    # Build a graph from node distances
     await asyncio.sleep(0.3)
     if globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"]:
-        print(f"Compression is cancelled when label {label} is compressed, before create G ")
         return None, None, None
-
-    
-    
-    # G
     mat = to_numpy_matrix(A)
     m = len(nodes_lst)
     submat = mat[np.ix_(nodes_lst, nodes_lst)]
     G = nx.Graph()
-    # Add nodes
     G.add_nodes_from(range(m))
-    # Add edges based on threshold
     for i in range(m):
         for j in range(i + 1, m):
             if submat[i, j] < final_eta:
-                G.add_edge(i, j, weight=float(submat[i, j]))  # ensure float, not numpy.float32
-    
-    
-
-    #os.makedirs(globals.TMP_DATA_FOR_GRAPH_DIR, exist_ok=True)
-    #base = f"{globals.TMP_DATA_FOR_GRAPH_DIR}/{label}_{req.compression_job_id}"
-
-    #graph_path = f"{base}.gpickle"
-    #tensor_path = f"{base}_nodes.pt"
-
-    #with open(graph_path, "wb") as f:
-    #    pickle.dump(G, f)
-
-    #torch.save(nodes_tensor, tensor_path)
-
+                G.add_edge(i, j, weight=float(submat[i, j]))
     return compressed_subset, G, nodes_tensor
 
 
 
-
-async def run_compression_job(req, labels):
+# Main driver for compressing all labels, yielding progress for event-streaming.
+async def run_compression_job(req: CompressRequest, labels: list[str]):
     start_time = time.time()
-
     compressed_data_by_label = {}
     G_by_label = {}
     nodes_tensor_by_label = {}
 
     for i, label in enumerate(labels):
-        await asyncio.sleep(0.3)
+
+        await asyncio.sleep(0.2)
         if globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"]:
             yield {"type": "cancelled", "progress": i}
-            return 
+            return
 
         compressed_subset, G, nodes_tensor = await compress_MFC_per_label(label, req)
+
+        await asyncio.sleep(0.2)
         if globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"]:
             yield {"type": "cancelled", "progress": i}
-            return 
+            return
 
         compressed_data_by_label[label] = compressed_subset
         G_by_label[label] = G
         nodes_tensor_by_label[label] = nodes_tensor
         yield {"type": "progress", "progress": i}
 
+    # Summary of whole compression job
     summary = {
         "compression_id": req.compression_job_id,
         "dataset_name": req.dataset_name,
@@ -160,70 +141,44 @@ async def run_compression_job(req, labels):
         "elapsed_seconds": int(time.time() - start_time),
         "labels": labels,
     }
-    
-    print(globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"])
-    # Grab final object if complete
+
+    # Store full result in memory if not cancelled
     if not globals.ACTIVE_JOBS["compression"][req.compression_job_id]["cancel"]:
         globals.ACTIVE_COMPRESSED_DATA_OBJ = CompressedDatasetObj(
-                                                compression_id=req.compression_job_id,
-                                                compressed_data_by_label=compressed_data_by_label,
-                                                G_by_label= G_by_label,
-                                                nodes_tensor_by_label= nodes_tensor_by_label,
-                                                summary=summary,
-                                                offsets_by_label={key: 0 for key in labels},
-                                            )
-    
+            compression_id=req.compression_job_id,
+            compressed_data_by_label=compressed_data_by_label,
+            G_by_label=G_by_label,
+            nodes_tensor_by_label=nodes_tensor_by_label,
+            summary=summary,
+            offsets_by_label={key: 0 for key in labels},
+        )
     yield {"type": "done"}
-    return 
 
 
-
-
-
-
+# Convert torch.Tensor to numpy for graph/selection logic
 def to_numpy_matrix(A):
-    """Convert A to a 2D numpy array. Accepts torch.Tensor or numpy array."""
     if isinstance(A, torch.Tensor):
-        return A.detach().cpu().numpy()
+        return A.cpu().numpy()
     return np.asarray(A)
 
 
-
+# Select nearby index values under distance threshold; used to sample satellites.
 def select_indices(matrix, k, threshold, num_samples):
-    # Step 1: ensure matrix is a proper 2D NumPy array
     if isinstance(matrix, torch.Tensor):
         matrix = matrix.detach().cpu().numpy()
-    elif isinstance(matrix, np.ndarray) and isinstance(matrix.flat[0], torch.Tensor):
-        # Convert element-wise if matrix is numpy array of tensors
-        matrix = np.array([[float(cell) for cell in row] for row in matrix])
-    else:
-        matrix = np.asarray(matrix)
+    matrix = np.asarray(matrix)
 
-    # Step 2: get row k
     row = matrix[k]
-    # Convert row to proper NumPy array if somehow still tensor
-    if isinstance(row, torch.Tensor):
-        row = row.detach().cpu().numpy()
-    elif isinstance(row, np.ndarray) and isinstance(row.flat[0], torch.Tensor):
-        row = np.array([float(cell) for cell in row])
-
-    #Step 3: filter indices < threshold
     valid_indices = np.where(row < threshold)[0]
     if len(valid_indices) == 0:
         return []
-    
-    # Step 4: sort by distance
+
     sorted_indices = valid_indices[np.argsort(row[valid_indices])]
 
-    # Step 5: evenly select up to num_samples
+    # Pick num_samples evenly spaced, excluding the center itself
     if len(sorted_indices) <= num_samples + 1:
         selected_indices = sorted_indices[1:]
     else:
-        step = int(math.floor(len(sorted_indices) / num_samples ))
+        step = int(math.floor(len(sorted_indices) / num_samples))
         selected_indices = [sorted_indices[1 + int(i * step)] for i in range(num_samples)]
-
     return [int(idx) for idx in selected_indices]
-
-
-
-

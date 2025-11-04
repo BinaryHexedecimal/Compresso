@@ -1,5 +1,3 @@
-#import random
-#from torch.utils.data import TensorDataset, Subset
 import json
 import os, glob
 from PIL import Image
@@ -12,15 +10,12 @@ from typing import List, Dict, Tuple
 from fastapi import HTTPException
 
 
-
-
-
 from models import OriginDatasetPerLabel
 import globals
-#from src import MFC
 
 
-# ------------------register dataset labels ------------------ #
+# ------------------ Dataset Label Registry ------------------ #
+# Load the mapping of dataset names to class labels.
 def load_dataset_classes():
     if os.path.exists(globals.REGISTRY_LABELS_PATH):
         with open(globals.REGISTRY_LABELS_PATH, "r") as f:
@@ -28,11 +23,15 @@ def load_dataset_classes():
     else:
         return {}
 
+
+# Save updated {dataset:classes} mapping back to disk.
 def save_dataset_classes(dataset_classes: dict):
     with open(globals.REGISTRY_LABELS_PATH, "w") as f:
         json.dump(dataset_classes, f, indent=4)
     print(f"Saved dataset registry to {globals.REGISTRY_LABELS_PATH}")
 
+
+# Add a new dataset and its classed to the registry.
 def register_dataset_classes(dataset_name: str, class_names: list):
     data = load_dataset_classes()
     if dataset_name in data:
@@ -42,7 +41,8 @@ def register_dataset_classes(dataset_name: str, class_names: list):
         save_dataset_classes(data)
 
 
-# ------------------register active dataset ------------------ #
+# ------------------ Dataset Name Registry ------------------ #
+# Load all active dataset names.
 def load_dataset_names():
     if os.path.exists(globals.REGISTRY_ACTIVE_DATASETS_PATH):
         with open(globals.REGISTRY_ACTIVE_DATASETS_PATH, "r") as f:
@@ -50,20 +50,25 @@ def load_dataset_names():
     else:
         return {}
 
+
+# Save updated active dataset names.
 def save_dataset_names(active_datasets: list):
     with open(globals.REGISTRY_ACTIVE_DATASETS_PATH, "w") as f:
         json.dump(active_datasets, f, indent=4)
     print(f"Saved dataset registry to {globals.REGISTRY_ACTIVE_DATASETS_PATH}")
 
+
+# Register a dataset name as active.
 def register_dataset_names(dataset_name: str):
     data = load_dataset_names()
-    if dataset_name in data: # and data[dataset_name] == class_names:
-        print(f"Dataset name'{dataset_name}' already registered, skipping.")
+    if dataset_name in data:
+        print(f"Dataset name '{dataset_name}' already registered, skipping.")
     else:
         data.append(dataset_name)
         save_dataset_names(data)
 
 
+# Remove dataset from active names registry.
 def deactive_dataset(dataset_name: str):
     data = load_dataset_names()
     if dataset_name not in data:
@@ -76,8 +81,8 @@ def deactive_dataset(dataset_name: str):
         return True
 
 
-# ------------------ pre-process user-defined raw data ------------------
-
+# ------------------ User Data Helpers ------------------ #
+# Detect image mode (RGB/Grayscale) and dimension from first image in a folder.
 def detect_image_mode_and_size(data_dir):
     exts = ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tif", "*.tiff")
     files = []
@@ -85,25 +90,15 @@ def detect_image_mode_and_size(data_dir):
         files.extend(glob.glob(os.path.join(data_dir, "**", ext), recursive=True))
     if not files:
         raise ValueError(f"No image files found in {data_dir}")
-    # assume all images have the same mode and size
     img = Image.open(files[0])
     return img.mode, img.size
 
 
+# Load a user-defined dataset with train/test folder structure.
 def load_user_dataset(dataset_name: str, train_: bool = True):
-    """
-    Load a user-uploaded dataset from a folder-based structure:
-    data_dir/
-      ├── train/
-      │   ├── class1/
-      │   ├── class2/
-      └── test/
-          ├── class1/
-          ├── class2/
-    """
     user_data_dir = globals.RAW_DATA_DIR / dataset_name
     if not os.path.exists(user_data_dir):
-        raise ValueError("No such a directory for custom user dataset.")
+        raise ValueError("No such directory for custom user dataset.")
     train_dir = os.path.join(user_data_dir, "train")
     test_dir = os.path.join(user_data_dir, "test")
     base_dir = train_dir if train_ else test_dir
@@ -111,7 +106,7 @@ def load_user_dataset(dataset_name: str, train_: bool = True):
         raise ValueError(f"Directory not found: {base_dir}")
 
     mode, size = detect_image_mode_and_size(base_dir)
-    if mode == "L": # grayscale
+    if mode == "L":  # grayscale
         mean, std = [0.5], [0.5]
         resize_to = (28, 28)
     else:
@@ -132,168 +127,104 @@ def load_user_dataset(dataset_name: str, train_: bool = True):
     return dataset
 
 
+# ------------------ Load and Prepare Builtin + User Data ------------------ #
+# Prepare built-in or user dataset for compression
+def prepare_train_data(dataset_name: str, percent: int):
+    _ = load_dataset(dataset_name, train_=True)
+    split_original_dataset_by_label(dataset_name, percent)
 
 
-# ------------------ load data ------------------
+# Prepare the test split for later model testing.
+def prepare_test_data(dataset_name: str):
+    _ = load_dataset(dataset_name, train_=False)
 
 
-def prepare_train_data(dataset_name:str, percent: int):
-    _ = load_dataset(dataset_name, train_ = True)
-    create_train_data_obj(dataset_name, percent)
-
-
-def prepare_test_data(dataset_name:str):
-    _ = load_dataset(dataset_name, train_ = False)
-
-
+# Load dataset by name; built-in datasets also register class names as needed.
 def load_dataset(dataset_name: str, train_: bool = True):
     dataset_name = dataset_name.lower()
-
     TRANSFORM = transforms.ToTensor()
 
     if dataset_name == "mnist":
-        if train_: 
+        if train_:
             register_dataset_classes("mnist", [str(i) for i in range(10)])
             register_dataset_names(dataset_name)
-        return datasets.MNIST(root=globals.RAW_DATA_DIR  / "MNIST", train=train_, download=True, transform=TRANSFORM)
+        return datasets.MNIST(root=globals.RAW_DATA_DIR / "MNIST", train=train_, download=True, transform=TRANSFORM)
     elif dataset_name == "cifar10":
         if train_:
             register_dataset_names(dataset_name)
-            register_dataset_classes("cifar10", datasets.CIFAR10(root=globals.RAW_DATA_DIR  / "CIFAR10", train=True, download=True).classes)
-        return datasets.CIFAR10(root=globals.RAW_DATA_DIR  / "CIFAR10", train=train_, download=True, transform=TRANSFORM)
+            register_dataset_classes("cifar10", datasets.CIFAR10(root=globals.RAW_DATA_DIR / "CIFAR10", train=True, download=True).classes)
+        return datasets.CIFAR10(root=globals.RAW_DATA_DIR / "CIFAR10", train=train_, download=True, transform=TRANSFORM)
     elif dataset_name == "cifar100":
         if train_:
             register_dataset_names(dataset_name)
-            register_dataset_classes("cifar100", datasets.CIFAR100(root=globals.RAW_DATA_DIR  / "CIFAR100", train=True, download=True).classes)
-        return datasets.CIFAR100(root=globals.RAW_DATA_DIR  / "CIFAR100", train=train_, download=True, transform=TRANSFORM)
+            register_dataset_classes("cifar100", datasets.CIFAR100(root=globals.RAW_DATA_DIR / "CIFAR100", train=True, download=True).classes)
+        return datasets.CIFAR100(root=globals.RAW_DATA_DIR / "CIFAR100", train=train_, download=True, transform=TRANSFORM)
     elif dataset_name == "svhn":
         if train_:
             register_dataset_names(dataset_name)
             register_dataset_classes("svhn", [str(i) for i in range(10)])
         split = "train" if train_ else "test"
-        return datasets.SVHN(root=globals.RAW_DATA_DIR  / "SVHN", split=split, download=True, transform=TRANSFORM)
+        return datasets.SVHN(root=globals.RAW_DATA_DIR / "SVHN", split=split, download=True, transform=TRANSFORM)
     else:
-        _dataset = load_user_dataset(dataset_name, train_=train_)
-        return _dataset
+        return load_user_dataset(dataset_name, train_=train_)
 
 
-
-# ------------------------prepare data, sorted by label----------------------#
-
-def create_train_data_obj(dataset_name: str, percent: int) :
-    """
-    Unified version: handles built-in and user datasets.
-    """
+# ------------------------ Per-Label Dataset Serialization ----------------------#
+# Split dataset into per-label tensors and save to disk for compression use.
+def split_original_dataset_by_label(dataset_name: str, percent: int):
     dataset_name = dataset_name.lower()
     out_dir = globals.DATA_PER_LABEL_DIR
 
+    # Built-in and user datasets get different percentage configs
     if dataset_name in globals.BUILT_IN_DATASET_NAMES:
-        save_path = out_dir/f"{dataset_name}_percent_{globals.BUILT_IN_DATASET_PERCENT}"
+        save_path = out_dir / f"{dataset_name}_percent_{globals.BUILT_IN_DATASET_PERCENT}"
     else:
-        save_path = out_dir/f"{dataset_name}_percent_{globals.USER_DATASET_PERCENT}"
+        save_path = out_dir / f"{dataset_name}_percent_{globals.USER_DATASET_PERCENT}"
 
     if os.path.exists(save_path):
         print(f"Origin data object per label already exists at {save_path}")
     else:
-
         os.makedirs(save_path, exist_ok=True)
         print(f"Processing dataset: {dataset_name} ({percent}% of data)")
 
-        # --- Load dataset ---
         dataset = load_dataset(dataset_name, train_=True)
-        classes = load_dataset_classes()[dataset_name]   # e.g. ['cat','dog','car']
+        classes = load_dataset_classes()[dataset_name]
 
-        # --- Initialize class buckets by index ---
+        # Collect samples into per-class buckets
         num_classes = len(classes)
         buckets = {i: [] for i in range(num_classes)}
-
         for img, label in dataset:
             buckets[label].append(img)
 
-        # --- Stack tensors per class, apply percent sampling ---
+        # Stack and save tensors per label
+        num_per_label = {}
         for idx, imgs in buckets.items():
             orig_count = len(imgs)
             if orig_count == 0:
                 continue
-
             take_count = max(1, int(orig_count * percent / 100))
             selected_imgs = imgs[:take_count]
-            stacked_tensor = torch.stack(selected_imgs)  # shape: (N_class, C, H, W)
+            stacked_tensor = torch.stack(selected_imgs)
 
-            # --- Package into OriginDatasetObj ---
             data_obj = OriginDatasetPerLabel(
                 dataset_name=dataset_name,
                 stacked_tensor=stacked_tensor,
-                label=classes[idx]  # still store the readable names
+                label=classes[idx]
             )
-
-            # --- Save object ---
             torch.save(data_obj, save_path / f"{classes[idx]}.pt")
+            num_per_label[classes[idx]] = take_count
+
+        # Save label counts to JSON
+        with open(save_path / f"count.json", "w") as json_file:
+            json.dump(num_per_label, json_file, indent=4)
 
 
-
-
-
-
-# def prepare_trainable_data(compressed_dict: dict, dataset_name: str):
-#     all_x = []
-#     all_y = []
-
-#     class_names = load_dataset_classes()[dataset_name]
-#     label_to_index = {label: idx for idx, label in enumerate(class_names)}
-
-#     for label_str, subset in compressed_dict.items():
-#         all_x.append(subset)
-#         all_y.append(torch.full((subset.shape[0],), label_to_index[label_str], dtype=torch.long))
-
-#     train_x = torch.cat(all_x, dim=0)
-#     train_y = torch.cat(all_y, dim=0)
-
-#     res = {
-#         "train_x": train_x,
-#         "train_y": train_y,
-#         "dataset_name": dataset_name
-#     }
-#     return res
-
-
-
-
-# util_dataset.py
-
-
-
-# ------------------------
-# Dataset Listing
-# ------------------------
-# def get_dataset_names(root_dir: Path) -> List[str]:
-#     """
-#     Return all available dataset names detected in a given root directory.
-#     """
-#     if not root_dir.exists():
-#         return []
-
-#     return [d.name for d in root_dir.iterdir() if d.is_dir()]
-
-
-# def get_available_labels(load_dataset_classes_fn) -> Dict:
-#     """
-#     Wraps the existing `load_dataset_classes()` for consistency.
-#     """
-#     return load_dataset_classes_fn()
-
-
-# ------------------------
-# Dataset Deletion
-# ------------------------
+# ------------------------ Dataset Deletion ------------------------#
+# Delete all files and folders associated with a dataset.
 def delete_dataset_files(dataset_name: str) -> Tuple[int, List[str]]:
-    """
-    Delete all folder locations corresponding to a user dataset.
-
-    Returns:
-        success_count: number of folders successfully deleted
-        failure_paths: list of paths where deletion failed
-    """
+    
+    deactive_dataset(dataset_name)
+    
     paths_to_delete = [
         globals.DATA_PER_LABEL_DIR / f"{dataset_name}_percent_{globals.USER_DATASET_PERCENT}",
         globals.RAW_DATA_DIR / dataset_name,
@@ -302,7 +233,6 @@ def delete_dataset_files(dataset_name: str) -> Tuple[int, List[str]]:
 
     success_count = 0
     failure_paths = []
-
     for path in paths_to_delete:
         if path.exists():
             try:
@@ -311,38 +241,29 @@ def delete_dataset_files(dataset_name: str) -> Tuple[int, List[str]]:
             except Exception:
                 failure_paths.append(str(path))
 
-    return success_count, failure_paths
+    return success_count == len(paths_to_delete), failure_paths
 
 
-# ------------------------
-# Upload and Extraction
-# ------------------------
+# ------------------------ ZIP Upload and Process ------------------------#
+# Check that uploaded file is a .zip.
 def validate_zip_upload(filename: str):
-    """
-    Ensure that user-uploaded file is a ZIP file.
-    """
     if not filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="Only .zip files are supported.")
 
 
+# Save uploaded file to a temporary folder and return its path.
 def save_temp_upload(file, tmp_dir: Path = Path("/tmp")) -> Path:
-    """
-    Save uploaded file temporarily. Returns full temp file path.
-    """
     temp_path = tmp_dir / file.filename
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     return temp_path
 
 
+# Extract ZIP file to a dataset folder under RAW_DATA_DIR.
 def extract_zip_to_dataset_folder(temp_zip_path: Path, dataset_name: str) -> Path:
-    """
-    Unzip uploaded dataseet to the RAW_DATA_DIR.
-    Returns absolute path to the extracted dataset folder.
-    """
     dataset_folder = globals.RAW_DATA_DIR / dataset_name
     if dataset_folder.exists():
-        shutil.rmtree(dataset_folder)  # Replace existing version
+        shutil.rmtree(dataset_folder)  # Overwrite existing version
 
     with zipfile.ZipFile(temp_zip_path, "r") as zip_ref:
         zip_ref.extractall(dataset_folder)
@@ -350,42 +271,23 @@ def extract_zip_to_dataset_folder(temp_zip_path: Path, dataset_name: str) -> Pat
     return dataset_folder
 
 
-# ------------------------
-# Dataset Preprocessing
-# ------------------------
-# def preprocess_dataset(dataset_name: str, percent: int = 100):
-#     """
-#     Preprocesses raw uploaded dataset and creates DataPerLabelFolder structure.
-#     """
-#     create_train_data_obj(dataset_name, percent)
-
-
-# ----------------------
-# Full Upload Handler
-# ----------------------
+# High-level upload handler: save ZIP, extract, preprocess and return status.
 async def handle_user_dataset_upload(file) -> Dict[str, str]:
-    """
-    High-level handler for user dataset upload and initialization.
-    """
-    # Step 1: Validate and Save ZIP Temporarily
     validate_zip_upload(file.filename)
     temp_path = save_temp_upload(file)
     print(f"Received ZIP file: {temp_path}")
 
-    # Step 2: Extract ZIP
     dataset_name = Path(file.filename).stem
     try:
         extracted_folder = extract_zip_to_dataset_folder(temp_path, dataset_name)
         print(f"Extracted dataset to: {extracted_folder}")
     finally:
-        # Cleanup temp file
         if temp_path.exists():
             os.remove(temp_path)
             print(f"Removed temp file: {temp_path}")
 
-    # Step 3: Preprocess for Train/Compression Usage
-    #preprocess_dataset(dataset_name)
-    create_train_data_obj(dataset_name, percent=100)
+    # Preprocess extracted images for compression and training
+    split_original_dataset_by_label(dataset_name, percent=100)
 
     return {
         "status": "success",

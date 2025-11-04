@@ -235,3 +235,12 @@ async function highlightEdges(div, nodeIndex) {
         'line.width': widths
     }, updateIndices);
 }
+
+
+
+window.clearDotNetRefForGraph = function() {
+    if (window.DotNetRefForGraph) {
+        console.log("Cleaning up .NET reference for graph");
+        window.DotNetRefForGraph = null;
+    }
+};
